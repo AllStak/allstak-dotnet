@@ -53,6 +53,7 @@ public sealed class DatabaseModule : IDisposable
             DatabaseType = databaseType,
             Service = _options.ServiceName,
             Environment = _options.Environment,
+            Release = _options.Release,
             TraceId = traceId,
             SpanId = spanId,
             RowsAffected = rowsAffected,

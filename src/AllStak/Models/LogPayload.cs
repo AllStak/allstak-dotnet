@@ -17,6 +17,9 @@ internal sealed class LogPayload
     [JsonPropertyName("environment")]
     public string? Environment { get; set; }
 
+    [JsonPropertyName("release")]
+    public string? Release { get; set; }
+
     [JsonPropertyName("traceId")]
     public string? TraceId { get; set; }
 

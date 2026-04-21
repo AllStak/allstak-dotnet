@@ -53,7 +53,7 @@ public sealed class TracingModule : IDisposable
 
         return new Span(
             traceId, spanId, parentSpanId, operation, description,
-            _options.ServiceName, _options.Environment ?? "",
+            _options.ServiceName, _options.Environment ?? "", _options.Release ?? "",
             tags != null ? new Dictionary<string, string>(tags) : new Dictionary<string, string>(),
             NowMs(), OnSpanFinished);
     }
@@ -98,6 +98,7 @@ public sealed class Span : IDisposable
     internal string Description { get; private set; }
     internal string Service { get; }
     internal string Environment { get; }
+    internal string Release { get; }
     internal Dictionary<string, string> Tags { get; }
     internal long StartTimeMs { get; }
     internal long? EndTimeMs { get; private set; }
@@ -105,7 +106,7 @@ public sealed class Span : IDisposable
     private bool _finished;
 
     internal Span(string traceId, string spanId, string parentSpanId, string operation,
-        string description, string service, string environment,
+        string description, string service, string environment, string release,
         Dictionary<string, string> tags, long startTimeMs, Action<Span> onFinish)
     {
         TraceId = traceId;
@@ -115,6 +116,7 @@ public sealed class Span : IDisposable
         Description = description;
         Service = service;
         Environment = environment;
+        Release = release;
         Tags = tags;
         StartTimeMs = startTimeMs;
         _onFinish = onFinish;
@@ -151,6 +153,7 @@ public sealed class Span : IDisposable
             EndTimeMillis = end,
             Service = Service,
             Environment = Environment,
+            Release = Release,
             Tags = Tags,
         };
     }

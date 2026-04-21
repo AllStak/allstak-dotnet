@@ -55,7 +55,7 @@ public sealed class AllStakClient : IDisposable
         Http = new HttpMonitorModule(_transport, options, _logger);
         Tracing = new TracingModule(_transport, options, _logger);
         Database = new DatabaseModule(_transport, options, _logger);
-        Cron = new CronModule(_transport, _logger);
+        Cron = new CronModule(_transport, options, _logger);
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
     }

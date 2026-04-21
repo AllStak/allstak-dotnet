@@ -16,4 +16,10 @@ internal sealed class HeartbeatPayload
 
     [JsonPropertyName("message")]
     public string? Message { get; set; }
+
+    [JsonPropertyName("environment")]
+    public string? Environment { get; set; }
+
+    [JsonPropertyName("release")]
+    public string? Release { get; set; }
 }

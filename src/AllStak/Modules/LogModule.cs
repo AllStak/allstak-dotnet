@@ -45,6 +45,7 @@ public sealed class LogModule : IDisposable
             Message = message,
             Service = service ?? _options.ServiceName,
             Environment = _options.Environment,
+            Release = _options.Release,
             TraceId = traceId,
             SpanId = spanId,
             RequestId = requestId,

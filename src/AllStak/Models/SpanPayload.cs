@@ -38,6 +38,9 @@ internal sealed class SpanPayload
     [JsonPropertyName("environment")]
     public string Environment { get; set; } = "";
 
+    [JsonPropertyName("release")]
+    public string Release { get; set; } = "";
+
     [JsonPropertyName("tags")]
     public Dictionary<string, string> Tags { get; set; } = new();
 

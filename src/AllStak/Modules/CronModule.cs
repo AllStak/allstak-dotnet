@@ -13,10 +13,12 @@ public sealed class CronModule
     private const string Path = "/ingest/v1/heartbeat";
     private readonly HttpTransport _transport;
     private readonly ILogger _logger;
+    private readonly AllStakOptions _options;
 
-    internal CronModule(HttpTransport transport, ILogger logger)
+    internal CronModule(HttpTransport transport, AllStakOptions options, ILogger logger)
     {
         _transport = transport;
+        _options = options;
         _logger = logger;
     }
 
@@ -39,7 +41,15 @@ public sealed class CronModule
         if (_transport.IsDisabled) return false;
         try
         {
-            var payload = new HeartbeatPayload { Slug = slug, Status = status, DurationMs = durationMs, Message = message };
+            var payload = new HeartbeatPayload
+            {
+                Slug = slug,
+                Status = status,
+                DurationMs = durationMs,
+                Message = message,
+                Environment = _options.Environment,
+                Release = _options.Release,
+            };
             var (code, _) = await _transport.PostAsync(Path, payload, ct).ConfigureAwait(false);
             return code == 202;
         }
