@@ -1,0 +1,15 @@
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/bin/Release/net9.0/AllStak.deps.json
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/bin/Release/net9.0/AllStak.dll
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/bin/Release/net9.0/AllStak.pdb
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/bin/Release/net9.0/AllStak.xml
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.csproj.AssemblyReference.cache
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.GeneratedMSBuildEditorConfig.editorconfig
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.AssemblyInfoInputs.cache
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.AssemblyInfo.cs
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.csproj.CoreCompileInputs.cache
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.sourcelink.json
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.dll
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/refint/AllStak.dll
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.xml
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/AllStak.pdb
+/Volumes/M.2/MyProjects/AllStak-Projects/sdks/allstak-dotnet/src/AllStak/obj/Release/net9.0/ref/AllStak.dll

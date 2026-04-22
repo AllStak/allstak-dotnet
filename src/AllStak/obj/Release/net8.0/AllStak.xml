@@ -72,7 +72,7 @@
         <member name="P:AllStak.AllStakOptions.Host">
             <summary>
             Base URL of the AllStak backend (without trailing slash).
-            Default: <c>http://localhost:8080</c>. Set to your production ingest host in prod.
+            Default: <c>https://api.allstak.sa</c>. Override for self-hosted or local-dev use.
             </summary>
         </member>
         <member name="P:AllStak.AllStakOptions.Environment">
@@ -181,6 +181,24 @@
              builder.Services.AddTransient&lt;AllStakHttpHandler&gt;();
              </code>
              </summary>
+        </member>
+        <member name="T:AllStak.Integrations.Logging.AllStakLoggerProvider">
+             <summary>
+             Microsoft.Extensions.Logging provider that ships every <c>ILogger</c> call
+             at <c>Information</c> or above to AllStak's logs ingest. Plug it into the
+             host's logging pipeline to get auto-capture without sprinkling
+             <c>AllStakClient.Instance.Log.Info(...)</c> through your code.
+            
+             Usage (Program.cs):
+             <code>
+             builder.Logging.AddProvider(new AllStakLoggerProvider());
+             </code>
+            
+             Or via the helper extension <c>builder.Logging.AddAllStak();</c>.
+             </summary>
+        </member>
+        <member name="M:AllStak.Integrations.Logging.AllStakLoggerExtensions.AddAllStak(Microsoft.Extensions.Logging.ILoggingBuilder,Microsoft.Extensions.Logging.LogLevel)">
+            <summary>Convenience: <c>builder.Logging.AddAllStak();</c></summary>
         </member>
         <member name="T:AllStak.Models.DbQueryPayload">
             <summary>DB query record for <c>POST /ingest/v1/db</c>.</summary>

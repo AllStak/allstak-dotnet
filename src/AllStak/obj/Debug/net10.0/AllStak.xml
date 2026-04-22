@@ -1,0 +1,312 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>AllStak</name>
+    </assembly>
+    <members>
+        <member name="T:AllStak.AllStakClient">
+            <summary>
+            The AllStak .NET SDK client. Create once at application startup
+            via <see cref="M:AllStak.AllStakClient.Initialize(System.Action{AllStak.AllStakOptions},Microsoft.Extensions.Logging.ILogger)"/>, or inject it via DI
+            with <c>AddAllStak</c>.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Instance">
+            <summary>Process-wide singleton. Throws if not initialized.</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.IsInitialized">
+            <summary>True if <see cref="M:AllStak.AllStakClient.Initialize(System.Action{AllStak.AllStakOptions},Microsoft.Extensions.Logging.ILogger)"/> has been called.</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Errors">
+            <summary>Error capture module.</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Logs">
+            <summary>Structured logs module.</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Http">
+            <summary>HTTP monitoring module (inbound + outbound).</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Tracing">
+            <summary>Distributed tracing module.</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Database">
+            <summary>Database query telemetry module.</summary>
+        </member>
+        <member name="P:AllStak.AllStakClient.Cron">
+            <summary>Cron / background job monitoring module.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.Initialize(System.Action{AllStak.AllStakOptions},Microsoft.Extensions.Logging.ILogger)">
+            <summary>Initialize the singleton. Subsequent calls return the existing instance.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.InitializeFromOptions(AllStak.AllStakOptions,Microsoft.Extensions.Logging.ILogger)">
+            <summary>Used by DI registration. Internal.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.Reset">
+            <summary>Reset the singleton. Used by tests.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.CaptureExceptionAsync(System.Exception,System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>Convenience: capture an exception on the singleton.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.SetUser(System.String,System.String,System.String)">
+            <summary>Set current user context on the singleton.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.ClearUser">
+            <summary>Clear user context on the singleton.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.FlushAllAsync">
+            <summary>Flush all buffered telemetry across modules.</summary>
+        </member>
+        <member name="M:AllStak.AllStakClient.Shutdown">
+            <summary>Best-effort shutdown — flushes all buffers and disposes resources.</summary>
+        </member>
+        <member name="T:AllStak.AllStakOptions">
+            <summary>
+            Configuration options for the AllStak SDK.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.ApiKey">
+            <summary>
+            API key sent as <c>X-AllStak-Key</c>. Required.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.Host">
+            <summary>
+            Base URL of the AllStak backend (without trailing slash).
+            Default: <c>http://localhost:8080</c>. Set to your production ingest host in prod.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.Environment">
+            <summary>
+            Deployment environment, e.g. <c>"production"</c>, <c>"staging"</c>.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.Release">
+            <summary>
+            App version or release tag, e.g. <c>"taskflow@1.4.2"</c>.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.ServiceName">
+            <summary>
+            Logical service name attached to spans and logs.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.FlushIntervalMs">
+            <summary>
+            Background flush interval in milliseconds. Default 2000 ms.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.BufferSize">
+            <summary>
+            Maximum number of items held per feature buffer. Default 500.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.Debug">
+            <summary>
+            Enable verbose SDK debug logging to ILogger. Default false.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.ConnectTimeoutMs">
+            <summary>
+            Connect timeout (ms) for transport calls. Default 3000 ms.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.ReadTimeoutMs">
+            <summary>
+            Read timeout (ms) for transport calls. Default 3000 ms.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.MaxRetries">
+            <summary>
+            Maximum transport attempts per event. Default 5.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.CaptureUnhandledExceptions">
+            <summary>
+            If <c>true</c>, automatically capture unhandled exceptions from ASP.NET Core routes.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.CaptureHttpRequests">
+            <summary>
+            If <c>true</c>, automatically capture inbound HTTP request telemetry via the middleware.
+            </summary>
+        </member>
+        <member name="P:AllStak.AllStakOptions.CaptureUserContext">
+            <summary>
+            If <c>true</c>, attach user context from <c>HttpContext.User</c> to captured events.
+            </summary>
+        </member>
+        <member name="T:AllStak.Integrations.AspNetCore.AllStakMiddleware">
+            <summary>
+            ASP.NET Core middleware that:
+            1. Starts a fresh trace per request (or adopts <c>traceparent</c> / <c>X-AllStak-Trace-Id</c> if present)
+            2. Captures inbound HTTP request telemetry (method, path, host, status, duration, sizes)
+            3. Auto-captures unhandled exceptions with full request context, user, stack, and trace link
+            4. Rethrows so the framework's own exception handler runs.
+            </summary>
+        </member>
+        <member name="M:AllStak.Integrations.AspNetCore.AllStakServiceCollectionExtensions.AddAllStak(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{AllStak.AllStakOptions})">
+            <summary>
+            Register the AllStak SDK in DI. The client is initialized as a singleton.
+            Call <c>app.UseAllStak()</c> to register the request middleware.
+            </summary>
+        </member>
+        <member name="M:AllStak.Integrations.AspNetCore.AllStakApplicationBuilderExtensions.UseAllStak(Microsoft.AspNetCore.Builder.IApplicationBuilder)">
+            <summary>
+            Register the AllStak request middleware.
+            Should be registered BEFORE UseRouting / UseEndpoints and AFTER UseExceptionHandler
+            (so it can observe the final status code).
+            </summary>
+        </member>
+        <member name="T:AllStak.Integrations.EntityFrameworkCore.AllStakDbCommandInterceptor">
+             <summary>
+             EF Core DbCommand interceptor that records every query as DB telemetry.
+            
+             Register via:
+             <code>
+             services.AddDbContext&lt;MyDbContext&gt;(opts =&gt;
+                 opts.UseSqlite(conn).AddInterceptors(new AllStakDbCommandInterceptor()));
+             </code>
+             </summary>
+        </member>
+        <member name="T:AllStak.Integrations.HttpClient.AllStakHttpHandler">
+             <summary>
+             Delegating handler that captures outbound HttpClient calls — method, host, path,
+             status, duration, request/response size — and records them as <c>outbound</c>
+             telemetry in AllStak.
+            
+             Usage:
+             <code>
+             builder.Services.AddHttpClient("default")
+                 .AddHttpMessageHandler&lt;AllStakHttpHandler&gt;();
+             builder.Services.AddTransient&lt;AllStakHttpHandler&gt;();
+             </code>
+             </summary>
+        </member>
+        <member name="T:AllStak.Integrations.Logging.AllStakLoggerProvider">
+             <summary>
+             Microsoft.Extensions.Logging provider that ships every <c>ILogger</c> call
+             at <c>Information</c> or above to AllStak's logs ingest. Plug it into the
+             host's logging pipeline to get auto-capture without sprinkling
+             <c>AllStakClient.Instance.Log.Info(...)</c> through your code.
+            
+             Usage (Program.cs):
+             <code>
+             builder.Logging.AddProvider(new AllStakLoggerProvider());
+             </code>
+            
+             Or via the helper extension <c>builder.Logging.AddAllStak();</c>.
+             </summary>
+        </member>
+        <member name="M:AllStak.Integrations.Logging.AllStakLoggerExtensions.AddAllStak(Microsoft.Extensions.Logging.ILoggingBuilder,Microsoft.Extensions.Logging.LogLevel)">
+            <summary>Convenience: <c>builder.Logging.AddAllStak();</c></summary>
+        </member>
+        <member name="T:AllStak.Models.DbQueryPayload">
+            <summary>DB query record for <c>POST /ingest/v1/db</c>.</summary>
+        </member>
+        <member name="T:AllStak.Models.ErrorPayload">
+            <summary>Payload for <c>POST /ingest/v1/errors</c>.</summary>
+        </member>
+        <member name="T:AllStak.Models.Breadcrumb">
+            <summary>Breadcrumb attached to the next captured error.</summary>
+        </member>
+        <member name="T:AllStak.Models.HeartbeatPayload">
+            <summary>Payload for <c>POST /ingest/v1/heartbeat</c>.</summary>
+        </member>
+        <member name="T:AllStak.Models.HttpRequestItem">
+            <summary>Single HTTP request/response record for <c>POST /ingest/v1/http-requests</c>.</summary>
+        </member>
+        <member name="T:AllStak.Models.HttpRequestBatch">
+            <summary>Batch wrapper for HTTP request ingestion (max 100 items).</summary>
+        </member>
+        <member name="T:AllStak.Models.LogPayload">
+            <summary>Payload for <c>POST /ingest/v1/logs</c>.</summary>
+        </member>
+        <member name="T:AllStak.Models.SpanPayload">
+            <summary>Single span for <c>POST /ingest/v1/spans</c>.</summary>
+        </member>
+        <member name="T:AllStak.Models.UserContext">
+            <summary>Optional user context attached to captured events.</summary>
+        </member>
+        <member name="T:AllStak.Models.RequestContext">
+            <summary>Optional HTTP request context attached to error events.</summary>
+        </member>
+        <member name="T:AllStak.Modules.CronModule">
+            <summary>
+            Cron / background-job monitoring. Sends a heartbeat per job execution.
+            Auto-creates the monitor on first ping (backend behavior).
+            </summary>
+        </member>
+        <member name="M:AllStak.Modules.CronModule.Job(System.String)">
+             <summary>
+             Wrap a job body in a using-block; success/failure heartbeat is sent on dispose.
+             Exceptions inside the block are re-thrown — the SDK never swallows user exceptions.
+            
+             <code>
+             using (AllStakClient.Instance.Cron.Job("daily-report"))
+             {
+                 await GenerateReport();
+             }
+             </code>
+             </summary>
+        </member>
+        <member name="M:AllStak.Modules.CronModule.PingAsync(System.String,System.String,System.Int64,System.String,System.Threading.CancellationToken)">
+            <summary>Send a single heartbeat ping directly.</summary>
+        </member>
+        <member name="T:AllStak.Modules.JobHandle">
+            <summary>Dispose to send success/failure heartbeat.</summary>
+        </member>
+        <member name="M:AllStak.Modules.JobHandle.MarkFailed(System.String)">
+            <summary>Mark the job as failed with a message. Pending heartbeat will be "failed".</summary>
+        </member>
+        <member name="T:AllStak.Modules.DatabaseModule">
+            <summary>Database query telemetry, buffered and batched (100/batch).</summary>
+        </member>
+        <member name="T:AllStak.Modules.ErrorModule">
+            <summary>Captures exceptions and ships them to AllStak.</summary>
+        </member>
+        <member name="M:AllStak.Modules.ErrorModule.SetUser(System.String,System.String,System.String)">
+            <summary>Set a default user context attached to all subsequent error events.</summary>
+        </member>
+        <member name="M:AllStak.Modules.ErrorModule.ClearUser">
+            <summary>Clear the current user context.</summary>
+        </member>
+        <member name="M:AllStak.Modules.ErrorModule.AddBreadcrumb(System.String,System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>Add a breadcrumb. Oldest are dropped beyond 50.</summary>
+        </member>
+        <member name="M:AllStak.Modules.ErrorModule.CaptureExceptionAsync(System.Exception,System.String,AllStak.Models.UserContext,AllStak.Models.RequestContext,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Threading.CancellationToken)">
+            <summary>Capture a .NET exception and send it to AllStak. Never throws.</summary>
+        </member>
+        <member name="M:AllStak.Modules.ErrorModule.CaptureErrorAsync(System.String,System.String,System.Collections.Generic.List{System.String},System.String,AllStak.Models.UserContext,AllStak.Models.RequestContext,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Threading.CancellationToken)">
+            <summary>Capture an error by class + message without a .NET exception object.</summary>
+        </member>
+        <member name="T:AllStak.Modules.HttpMonitorModule">
+            <summary>Inbound and outbound HTTP request telemetry. Batches up to 100 per POST.</summary>
+        </member>
+        <member name="T:AllStak.Modules.LogModule">
+            <summary>Buffered log ingestion. Each log is sent as its own POST.</summary>
+        </member>
+        <member name="M:AllStak.Modules.LogModule.Log(System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>Buffer a log for async delivery.</summary>
+        </member>
+        <member name="T:AllStak.Modules.TracingModule">
+            <summary>Distributed tracing spans, buffered and batched.</summary>
+        </member>
+        <member name="M:AllStak.Modules.TracingModule.StartSpan(System.String,System.String,System.Collections.Generic.IDictionary{System.String,System.String})">
+            <summary>Begin a span. Dispose the returned Span to finish it.</summary>
+        </member>
+        <member name="T:AllStak.Modules.Span">
+            <summary>A single span. Dispose to finish.</summary>
+        </member>
+        <member name="T:AllStak.Transport.FlushBuffer`1">
+            <summary>
+            Bounded ring buffer with a background timer thread that periodically
+            drains the buffer and calls the supplied flush delegate.
+            </summary>
+        </member>
+        <member name="T:AllStak.Transport.HttpTransport">
+            <summary>
+            HTTP transport with retry/backoff + 401-disable.
+            </summary>
+        </member>
+    </members>
+</doc>
