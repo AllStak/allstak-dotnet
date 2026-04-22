@@ -12,9 +12,9 @@ public class AllStakOptions
 
     /// <summary>
     /// Base URL of the AllStak backend (without trailing slash).
-    /// Default: <c>http://localhost:8080</c>. Set to your production ingest host in prod.
+    /// Default: <c>https://api.allstak.sa</c>. Override for self-hosted or local-dev use.
     /// </summary>
-    public string Host { get; set; } = "http://localhost:8080";
+    public string Host { get; set; } = "https://api.allstak.sa";
 
     /// <summary>
     /// Deployment environment, e.g. <c>"production"</c>, <c>"staging"</c>.

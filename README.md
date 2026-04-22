@@ -150,7 +150,7 @@ await client.FlushAllAsync();
 | Property               | Default                   | Notes |
 | ---------------------- | ------------------------- | ----- |
 | `ApiKey`               | _required_                | Your `ask_live_...` key. |
-| `Host`                 | `http://localhost:8080`   | Override with your AllStak ingest host. |
+| `Host`                 | `https://api.allstak.sa`   | Override with your AllStak ingest host. |
 | `Environment`          | `null`                    | e.g. `"production"` |
 | `Release`              | `null`                    | e.g. `"myapp@1.4.2"` |
 | `ServiceName`          | `"dotnet-service"`        | Shown on spans and logs. |
