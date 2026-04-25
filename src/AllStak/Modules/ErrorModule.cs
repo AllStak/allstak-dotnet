@@ -83,8 +83,14 @@ public sealed class ErrorModule
                 TraceId = traceId,
                 User = user ?? _currentUser,
                 RequestContext = request,
-                Metadata = metadata,
+                Metadata = MergeReleaseTags(metadata),
                 Breadcrumbs = crumbs,
+                // Phase 3 — v2 ingest contract: top-level identity + structured frames.
+                SdkName = _options.SdkNameOverride ?? AllStak.AllStakOptions.SdkName,
+                SdkVersion = _options.SdkVersionOverride ?? AllStak.AllStakOptions.SdkVersion,
+                Platform = _options.Platform,
+                Dist = _options.Dist,
+                Frames = ExtractStructuredFrames(exc),
             };
             var (status, body) = await _transport.PostAsync(Path, payload, ct).ConfigureAwait(false);
             if (status == 202)
@@ -143,7 +149,10 @@ public sealed class ErrorModule
                 TraceId = traceId,
                 User = user ?? _currentUser,
                 RequestContext = request,
-                Metadata = metadata,
+                // Merge release-tracking tags (sdk.name/version, platform, dist,
+                // commit.sha/branch) under any caller-supplied entries so the
+                // dashboard can group / filter by them on every event.
+                Metadata = MergeReleaseTags(metadata),
                 Breadcrumbs = crumbs,
             };
             var (status, _) = await _transport.PostAsync(Path, payload, ct).ConfigureAwait(false);
@@ -154,6 +163,22 @@ public sealed class ErrorModule
             _logger.LogDebug(ex, "[AllStak] capture_error swallowed");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Build the metadata map sent on every event. Release-tracking tags
+    /// (sdk.name / sdk.version / platform / dist / commit.sha / commit.branch)
+    /// flow in from <see cref="AllStakOptions.ReleaseTags"/>; caller metadata
+    /// wins on key collision.
+    /// </summary>
+    private Dictionary<string, object>? MergeReleaseTags(Dictionary<string, object>? caller)
+    {
+        var tags = _options.ReleaseTags();
+        if (tags.Count == 0) return caller;
+        var merged = new Dictionary<string, object>(tags.Count + (caller?.Count ?? 0));
+        foreach (var kv in tags) merged[kv.Key] = kv.Value;
+        if (caller != null) foreach (var kv in caller) merged[kv.Key] = kv.Value;
+        return merged;
     }
 
     private static List<string> ExtractFrames(Exception exc)
@@ -170,5 +195,40 @@ public sealed class ErrorModule
             }
         }
         return frames;
+    }
+
+    /// <summary>Phase 3 — structured frames via System.Diagnostics.StackTrace.
+    /// Each .NET frame already has method, file, line — we just package them.</summary>
+    private static List<Frame> ExtractStructuredFrames(Exception exc)
+    {
+        var out_ = new List<Frame>();
+        try
+        {
+            var st = new System.Diagnostics.StackTrace(exc, fNeedFileInfo: true);
+            foreach (var f in st.GetFrames())
+            {
+                var m = f.GetMethod();
+                if (m == null) continue;
+                var fileName = f.GetFileName();
+                var typeName = m.DeclaringType?.FullName;
+                var fullFn = typeName != null ? $"{typeName}.{m.Name}" : m.Name;
+                bool inApp = !(typeName != null && (
+                    typeName.StartsWith("System.") || typeName.StartsWith("Microsoft.") ||
+                    typeName.StartsWith("AllStak.")));
+                out_.Add(new Frame
+                {
+                    Filename = fileName,
+                    AbsPath  = fileName,
+                    Function = fullFn,
+                    Lineno   = f.GetFileLineNumber(),
+                    Colno    = f.GetFileColumnNumber(),
+                    InApp    = inApp,
+                    Platform = "dotnet",
+                });
+                if (out_.Count >= 50) break;
+            }
+        }
+        catch { /* best-effort */ }
+        return out_;
     }
 }

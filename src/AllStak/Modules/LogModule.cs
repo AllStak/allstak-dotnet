@@ -39,6 +39,21 @@ public sealed class LogModule : IDisposable
         level = level.ToLowerInvariant();
         if (!ValidLevels.Contains(level)) level = "info";
 
+        // Merge release-tracking tags into metadata so the dashboard can
+        // filter logs by sdk.* / platform / commit.* without adding columns.
+        var releaseTags = _options.ReleaseTags();
+        Dictionary<string, object>? mergedMeta = null;
+        if (releaseTags.Count > 0)
+        {
+            mergedMeta = new Dictionary<string, object>(releaseTags.Count + (metadata?.Count ?? 0));
+            foreach (var kv in releaseTags) mergedMeta[kv.Key] = kv.Value;
+            if (metadata != null) foreach (var kv in metadata) mergedMeta[kv.Key] = kv.Value;
+        }
+        else
+        {
+            mergedMeta = metadata;
+        }
+
         _buffer.Push(new LogPayload
         {
             Level = level,
@@ -51,7 +66,7 @@ public sealed class LogModule : IDisposable
             RequestId = requestId,
             UserId = userId,
             ErrorId = errorId,
-            Metadata = metadata,
+            Metadata = mergedMeta,
         });
     }
 

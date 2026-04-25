@@ -52,6 +52,14 @@ internal sealed class HttpRequestItem
 
     [JsonPropertyName("release")]
     public string? Release { get; set; }
+
+    /// <summary>
+    /// Release-tracking metadata (sdk.name, sdk.version, platform, dist,
+    /// commit.sha, commit.branch). Backend stores these in the metadata JSON
+    /// column today; once dedicated columns land they're read out at ingest.
+    /// </summary>
+    [JsonPropertyName("metadata")]
+    public Dictionary<string, object>? Metadata { get; set; }
 }
 
 /// <summary>Batch wrapper for HTTP request ingestion (max 100 items).</summary>

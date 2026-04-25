@@ -5,6 +5,11 @@ namespace AllStak;
 /// </summary>
 public class AllStakOptions
 {
+    /// <summary>SDK identity sent on the wire as <c>sdk.name</c> / <c>sdk.version</c>.</summary>
+    public const string SdkName = "allstak-dotnet";
+    public const string SdkVersion = "1.2.0";
+
+
     /// <summary>
     /// API key sent as <c>X-AllStak-Key</c>. Required.
     /// </summary>
@@ -75,4 +80,53 @@ public class AllStakOptions
     /// If <c>true</c>, attach user context from <c>HttpContext.User</c> to captured events.
     /// </summary>
     public bool CaptureUserContext { get; set; } = true;
+
+    // Release-tracking metadata. All optional; the SDK reads conventional CI
+    // env vars (ALLSTAK_*, GIT_*, VERCEL_GIT_*) when these are unset so the
+    // `Release` / `CommitSha` / `Branch` fields appear automatically.
+    public string? Dist { get; set; }
+    public string? CommitSha { get; set; }
+    public string? Branch { get; set; }
+    public string? Platform { get; set; } = "dotnet";
+    public string? SdkNameOverride { get; set; }
+    public string? SdkVersionOverride { get; set; }
+
+    /// <summary>
+    /// Apply env-var auto-detection for release-tracking metadata. Called by
+    /// the SDK during initialization. Explicit user values always win.
+    /// </summary>
+    public void ApplyReleaseAutodetect()
+    {
+        static string? FirstNonEmpty(params string[] keys)
+        {
+            foreach (var k in keys)
+            {
+                var v = System.Environment.GetEnvironmentVariable(k);
+                if (!string.IsNullOrEmpty(v)) return v;
+            }
+            return null;
+        }
+        Release ??= FirstNonEmpty("ALLSTAK_RELEASE",
+            "VERCEL_GIT_COMMIT_SHA", "RAILWAY_GIT_COMMIT_SHA", "RENDER_GIT_COMMIT");
+        CommitSha ??= FirstNonEmpty("ALLSTAK_COMMIT_SHA", "GIT_COMMIT",
+            "VERCEL_GIT_COMMIT_SHA", "RAILWAY_GIT_COMMIT_SHA", "RENDER_GIT_COMMIT");
+        Branch ??= FirstNonEmpty("ALLSTAK_BRANCH", "GIT_BRANCH",
+            "VERCEL_GIT_COMMIT_REF", "RAILWAY_GIT_BRANCH");
+        Environment ??= FirstNonEmpty("ALLSTAK_ENVIRONMENT", "ASPNETCORE_ENVIRONMENT", "DOTNET_ENVIRONMENT") ?? "production";
+    }
+
+    /// <summary>
+    /// Release-tracking tags merged into every event payload's metadata.
+    /// </summary>
+    public IDictionary<string, string> ReleaseTags()
+    {
+        var d = new Dictionary<string, string>();
+        d["sdk.name"] = SdkNameOverride ?? SdkName;
+        d["sdk.version"] = SdkVersionOverride ?? SdkVersion;
+        if (!string.IsNullOrEmpty(Platform)) d["platform"] = Platform!;
+        if (!string.IsNullOrEmpty(Dist)) d["dist"] = Dist!;
+        if (!string.IsNullOrEmpty(CommitSha)) d["commit.sha"] = CommitSha!;
+        if (!string.IsNullOrEmpty(Branch)) d["commit.branch"] = Branch!;
+        return d;
+    }
 }

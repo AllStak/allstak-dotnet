@@ -57,7 +57,24 @@ public sealed class HttpMonitorModule : IDisposable
             ParentSpanId = parentSpanId,
             Environment = _options.Environment,
             Release = _options.Release,
+            // Release-tracking metadata. We allocate a fresh dict per item
+            // because items live in a buffer; sharing a single map across
+            // pushes would race during flush.
+            Metadata = BuildReleaseTagsDict(),
         });
+    }
+
+    /// <summary>
+    /// Snapshot the release-tracking tags from <see cref="AllStakOptions.ReleaseTags"/>
+    /// into a fresh dictionary, or null if no tags are set.
+    /// </summary>
+    private Dictionary<string, object>? BuildReleaseTagsDict()
+    {
+        var tags = _options.ReleaseTags();
+        if (tags.Count == 0) return null;
+        var d = new Dictionary<string, object>(tags.Count);
+        foreach (var kv in tags) d[kv.Key] = kv.Value;
+        return d;
     }
 
     public Task FlushAsync() => _buffer.FlushAsync();
