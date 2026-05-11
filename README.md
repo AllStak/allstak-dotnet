@@ -3,7 +3,7 @@
 **Error tracking for .NET Core and ASP.NET. One-line `AddAllStak()` in `Program.cs`.**
 
 [![NuGet](https://img.shields.io/nuget/v/AllStak.svg)](https://www.nuget.org/packages/AllStak)
-[![CI](https://github.com/allstak-io/allstak-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/allstak-io/allstak-dotnet/actions)
+[![CI](https://github.com/AllStak/allstak-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/AllStak/allstak-dotnet/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Official AllStak SDK for .NET — captures exceptions, structured logs, HTTP requests, Entity Framework queries, and distributed traces for ASP.NET Core and .NET services.
@@ -129,7 +129,7 @@ builder.Services.AddAllStak(opts =>
 
 - Documentation: https://docs.allstak.sa
 - Dashboard: https://app.allstak.sa
-- Source: https://github.com/allstak-io/allstak-dotnet
+- Source: https://github.com/AllStak/allstak-dotnet
 
 ## License
 
