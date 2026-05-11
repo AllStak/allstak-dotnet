@@ -23,7 +23,7 @@ View captured events live at [app.allstak.sa](https://app.allstak.sa).
 - Entity Framework Core `DbCommandInterceptor` for query capture
 - Distributed tracing with `AllStak.Tracing.StartSpan`
 - Cron heartbeats and singleton or DI-based registration
-- Targets `net8.0`, `net9.0`, `net10.0`
+- Targets `net8.0`, `net9.0`
 
 ## What You Get
 
