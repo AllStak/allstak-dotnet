@@ -17,7 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageProjectUrl>https://allstak.sa</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/allstak-io/allstak-dotnet</RepositoryUrl>
+    <RepositoryUrl>https://github.com/AllStak/allstak-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <Copyright>Copyright (c) AllStak</Copyright>
 
