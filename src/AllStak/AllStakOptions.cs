@@ -12,8 +12,27 @@ public class AllStakOptions
 
     /// <summary>
     /// API key sent as <c>X-AllStak-Key</c>. Required.
+    /// Static convenience: if <see cref="ApiKeyProvider"/> is also set,
+    /// the provider wins (used for rotation without restart).
     /// </summary>
     public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional dynamic API key provider for rotation without restart.
+    /// Called per request when set. Return the current key; the transport
+    /// reads from environment / vault / KMS each call (cheap in practice
+    /// since most providers cache). If null, the static <see cref="ApiKey"/>
+    /// is used. (P0-H)
+    /// </summary>
+    public Func<string>? ApiKeyProvider { get; set; }
+
+    /// <summary>
+    /// Invoked when the HTTP transport exhausts retries for a request.
+    /// The SDK never re-throws to the caller — this callback is the
+    /// supported way to observe lost telemetry events so they can be
+    /// counted in your own metrics / logging pipeline. (P0-I)
+    /// </summary>
+    public Action<TransportErrorContext>? OnTransportError { get; set; }
 
     /// <summary>
     /// Base URL of the AllStak backend (without trailing slash).

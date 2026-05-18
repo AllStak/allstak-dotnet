@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
@@ -33,6 +34,8 @@ internal sealed class HttpTransport
     private readonly HttpClient _http;
     private readonly string _baseUrl;
     private readonly string _apiKey;
+    private readonly Func<string>? _apiKeyProvider;
+    private readonly Action<TransportErrorContext>? _onTransportError;
     private readonly int _maxRetries;
     private readonly ILogger _logger;
     private readonly Random _jitter = new();
@@ -44,13 +47,31 @@ internal sealed class HttpTransport
     {
         _baseUrl = options.Host.TrimEnd('/');
         _apiKey = options.ApiKey;
+        _apiKeyProvider = options.ApiKeyProvider;   // P0-H — dynamic rotation
+        _onTransportError = options.OnTransportError; // P0-I — observable failure
         _maxRetries = Math.Clamp(options.MaxRetries, 1, 5);
         _logger = logger;
         _http = new HttpClient
         {
             Timeout = TimeSpan.FromMilliseconds(options.ConnectTimeoutMs + options.ReadTimeoutMs),
         };
-        _http.DefaultRequestHeaders.TryAddWithoutValidation("X-AllStak-Key", _apiKey);
+        // Note: no DefaultRequestHeaders.X-AllStak-Key — set per-request via
+        // ResolveApiKey() so ApiKeyProvider can rotate without restart.
+    }
+
+    /// <summary>Resolve the current API key — provider wins over static. (P0-H)</summary>
+    private string ResolveApiKey()
+    {
+        if (_apiKeyProvider != null)
+        {
+            try { return _apiKeyProvider() ?? _apiKey; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[AllStak] ApiKeyProvider threw — falling back to static ApiKey");
+                return _apiKey;
+            }
+        }
+        return _apiKey;
     }
 
     public async Task<(int status, string body)> PostAsync<T>(string path, T payload, CancellationToken ct = default)
@@ -59,6 +80,26 @@ internal sealed class HttpTransport
             throw new AllStakAuthException("SDK disabled due to invalid API key");
 
         var url = $"{_baseUrl}{path}";
+
+        // P0-C — sanitize the wire payload BEFORE serializing it onto the network.
+        // Serialize → parse → recursive scrub → reserialize. The chokepoint here
+        // protects every telemetry type (errors, logs, http, db, traces) with
+        // one wire-in.
+        var rawJson = JsonSerializer.Serialize(payload);
+        string scrubbedJson;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            scrubbedJson = Sanitizer.SanitizeJson(doc.RootElement);
+        }
+        catch (Exception sanErr)
+        {
+            // Fail-open: if sanitizer crashes on something unexpected, never
+            // block telemetry — but log loud so we can find it.
+            _logger.LogWarning(sanErr, "[AllStak] sanitizer failed; sending raw payload as fallback (path={Path})", path);
+            scrubbedJson = rawJson;
+        }
+
         Exception? lastExc = null;
         int lastStatus = 0;
 
@@ -66,7 +107,11 @@ internal sealed class HttpTransport
         {
             try
             {
-                using var resp = await _http.PostAsJsonAsync(url, payload, ct).ConfigureAwait(false);
+                using var content = new StringContent(scrubbedJson, Encoding.UTF8, "application/json");
+                using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                // P0-H — per-request API key for rotation without restart.
+                req.Headers.TryAddWithoutValidation("X-AllStak-Key", ResolveApiKey());
+                using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
                 lastStatus = (int)resp.StatusCode;
                 var body = string.Empty;
                 try { body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false); } catch { }
@@ -109,6 +154,24 @@ internal sealed class HttpTransport
             }
         }
 
+        // P0-I — final failure is now visible.
+        // 1) Log at Warning (not Debug) so it shows up in default prod logging.
+        _logger.LogWarning(
+            lastExc,
+            "[AllStak] all {Attempts} attempts failed for POST {Path}. Last status={Status}. Event lost.",
+            _maxRetries, path, lastStatus);
+        // 2) Surface to the host app's metrics pipeline if they registered a handler.
+        if (_onTransportError != null)
+        {
+            try
+            {
+                _onTransportError(new TransportErrorContext(path, lastStatus, lastExc, _maxRetries));
+            }
+            catch (Exception cbErr)
+            {
+                _logger.LogWarning(cbErr, "[AllStak] OnTransportError callback threw");
+            }
+        }
         throw new AllStakTransportException(
             $"All {_maxRetries} attempts failed for POST {path}. Last status={lastStatus}, last error={lastExc?.Message}");
     }

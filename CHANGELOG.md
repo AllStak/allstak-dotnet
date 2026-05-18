@@ -3,6 +3,34 @@
 All notable changes to the AllStak .NET SDK.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## 0.1.2 — 2026-05-18
+
+Closes the three P0s flagged in the .NET modernization audit.
+
+### Added — P0-C: Sanitizer wired into wire path
+- New `AllStak.Sanitizer` static class with `Sanitize(IDictionary<string, object?>)` and `SanitizeJson(JsonElement)`. 25-term canonical denylist, recursive, cycle-safe via `RuntimeHelpers.GetHashCode`, pure (no caller mutation).
+- `HttpTransport.PostAsync<T>` now serialises payload → parses → scrubs → re-serialises before the network send. One chokepoint protects every telemetry type (errors, logs, http, db, traces).
+- Fail-open: if the sanitizer throws on a pathological payload, the SDK logs at Warning level and falls through with the raw payload — telemetry is never blocked.
+
+### Added — P0-H: API key rotation
+- `AllStakOptions.ApiKeyProvider: Func<string>?` — when set, the transport resolves the API key per-request via the delegate. Host apps can rotate keys from env / vault / KMS without restart.
+- `X-AllStak-Key` is now set per-request via `HttpRequestMessage` (was a default-header static-string before).
+
+### Added — P0-I: Observable transport failures
+- New `AllStak.TransportErrorContext` (path, last status, last exception, attempt count).
+- `AllStakOptions.OnTransportError: Action<TransportErrorContext>?` — invoked when `PostAsync` exhausts retries. Host apps can plug their own metrics pipeline / dead-letter queue.
+- Final exhausted-retries failure is now logged at **Warning** level (was Debug — effectively silent in production logging configs).
+
+### Live canary E2E
+Real on-the-wire proof against `https://api.allstak.sa`:
+- Event `e34bebf3-cdaf-485b-bb5c-5f0fa82901e1`.
+- ClickHouse query showed `leak_pos = 0` across `metadata`, `stack_trace`, `breadcrumbs`, `message`.
+- Canary `should_not_leak_dotnet` was planted in `password`, `authorization`, `cookie`, `Bearer`, `api_key`, request headers / body, `credit_card`, `ssn`, and a 3-level-nested `token` field. All scrubbed before the wire.
+
+### Build
+- 55/55 xUnit tests pass on `net10.0`. Sanitizer covers 11 of them.
+- Package built against `net8.0` + `net9.0`.
+
 ## 0.1.0 — 2026-04-11
 
 First public release. Driven end-to-end through a real ASP.NET Core 8 +
