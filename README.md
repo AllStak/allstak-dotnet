@@ -2,7 +2,6 @@
 
 **Error tracking for .NET Core and ASP.NET. One-line `AddAllStak()` in `Program.cs`.**
 
-[![NuGet](https://img.shields.io/nuget/v/AllStak.svg)](https://www.nuget.org/packages/AllStak)
 [![CI](https://github.com/AllStak/allstak-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/AllStak/allstak-dotnet/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -38,9 +37,23 @@ Once integrated, every event flows to your AllStak dashboard:
 
 ## Installation
 
-```bash
-dotnet add package AllStak
-```
+> **Not yet on NuGet.** `dotnet add package AllStak` is reserved
+> but does not resolve a published artifact yet. Until first
+> publish lands (tracked in
+> [`docs/devops/sdk-python-dotnet-first-publish.md`](https://github.com/AllStak/allstak/blob/dev/docs/devops/sdk-python-dotnet-first-publish.md)
+> in the platform monorepo), build and reference the project
+> directly from source:
+>
+> ```bash
+> git clone https://github.com/AllStak/allstak-dotnet.git
+> dotnet add reference path/to/allstak-dotnet/src/AllStak/AllStak.csproj
+> ```
+>
+> Once `0.1.x` ships on NuGet, the canonical install becomes:
+>
+> ```bash
+> dotnet add package AllStak
+> ```
 
 ## Quick Start
 
