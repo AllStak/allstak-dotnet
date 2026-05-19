@@ -27,8 +27,9 @@ jobs:
 
       - name: Test
         run: |
-          if ls tests/**/*.csproj 2>/dev/null 1>&2 || ls test/**/*.csproj 2>/dev/null 1>&2; then
-            dotnet test --configuration Release --no-build --verbosity normal
+          TEST_PROJ=$(find tests test -maxdepth 4 -name '*.csproj' -type f 2>/dev/null | head -n 1)
+          if [ -n "$TEST_PROJ" ]; then
+            dotnet test "$TEST_PROJ" --configuration Release --verbosity normal
           else
             echo "No test projects found; skipping"
           fi
