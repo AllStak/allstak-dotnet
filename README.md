@@ -1,41 +1,8 @@
-# AllStak
+# AllStak for .NET
 
-**Error tracking for .NET Core and ASP.NET. One-line `AddAllStak()` in `Program.cs`.**
+AllStak SDK for ASP.NET Core and .NET services. Captures exceptions, logs, inbound and outbound HTTP requests, spans, and Entity Framework telemetry.
 
-[![CI](https://github.com/AllStak/allstak-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/AllStak/allstak-dotnet/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-Official AllStak SDK for .NET — captures exceptions, structured logs, HTTP requests, Entity Framework queries, and distributed traces for ASP.NET Core and .NET services.
-
-## Dashboard
-
-View captured events live at [app.allstak.sa](https://app.allstak.sa).
-
-![AllStak dashboard](https://app.allstak.sa/images/dashboard-preview.png)
-
-## Features
-
-- `AppDomain.UnhandledException` capture
-- `Microsoft.Extensions.Logging` provider for structured logs
-- ASP.NET Core middleware for inbound request telemetry
-- `HttpClient` `DelegatingHandler` for outbound HTTP
-- Entity Framework Core `DbCommandInterceptor` for query capture
-- Distributed tracing with `AllStak.Tracing.StartSpan`
-- Cron heartbeats and singleton or DI-based registration
-- Targets `net8.0`, `net9.0`
-
-## What You Get
-
-Once integrated, every event flows to your AllStak dashboard:
-
-- **Errors** — stack traces, breadcrumbs, release + environment tags
-- **Logs** — structured logs bridged from `ILogger` with search and filters
-- **HTTP** — inbound and outbound request timing, status codes, failed calls
-- **Database** — Entity Framework Core query capture
-- **Traces** — distributed spans with context propagation
-- **Alerts** — email and webhook notifications on regressions
-
-## Installation
+## Install
 
 > **Not yet on NuGet.** `dotnet add package AllStak` is reserved
 > but does not resolve a published artifact yet. Until first
@@ -55,95 +22,70 @@ Once integrated, every event flows to your AllStak dashboard:
 > dotnet add package AllStak
 > ```
 
-## Quick Start
-
-> Create a project at [app.allstak.sa](https://app.allstak.sa) to get your API key.
+## ASP.NET Core setup
 
 ```csharp
 using AllStak;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddAllStak(opts =>
+builder.Services.AddAllStak(options =>
 {
-    opts.ApiKey = Environment.GetEnvironmentVariable("ALLSTAK_API_KEY")!;
-    opts.Environment = "production";
-    opts.Release = "myapp@1.0.0";
-    opts.ServiceName = "myapp-api";
+    options.ApiKey = Environment.GetEnvironmentVariable("ALLSTAK_API_KEY");
+    options.Environment = builder.Environment.EnvironmentName;
+    options.Release = Environment.GetEnvironmentVariable("ALLSTAK_RELEASE");
+    options.ServiceName = "checkout-api";
 });
 
 var app = builder.Build();
+
 app.UseAllStak();
 
-AllStakClient.Instance.Errors.Capture(new Exception("test: hello from allstak-dotnet"));
-
+app.MapGet("/health", () => Results.Ok(new { ok = true }));
 app.Run();
 ```
 
-Run the app — the test error appears in your dashboard within seconds.
+## Manual capture
 
-## Get Your API Key
+```csharp
+AllStakClient.Instance.Errors.Capture(new InvalidOperationException("checkout failed"));
+AllStakClient.Instance.Logs.Info("payment retry", new Dictionary<string, object>
+{
+    ["orderId"] = "ord_123"
+});
+```
 
-1. Sign up at [app.allstak.sa](https://app.allstak.sa)
-2. Create a project
-3. Copy your API key from **Project Settings → API Keys**
-4. Export it as `ALLSTAK_API_KEY` or pass it to `AddAllStak(opts => opts.ApiKey = ...)`
+## HttpClient
+
+Register the AllStak handler with clients that should emit outbound request telemetry:
+
+```csharp
+builder.Services.AddHttpClient("payments")
+    .AddHttpMessageHandler<AllStakHttpClientHandler>();
+```
 
 ## Configuration
 
-| Option | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `ApiKey` | `string` | yes | — | Project API key (`ask_live_…`) |
-| `Host` | `string` | no | `https://api.allstak.sa` | Ingest host override |
-| `Environment` | `string?` | no | — | Deployment env |
-| `Release` | `string?` | no | — | Version / build tag |
-| `ServiceName` | `string` | no | `dotnet-service` | Logical service identifier |
-| `FlushIntervalMs` | `int` | no | `2000` | Background flush cadence |
-| `BufferSize` | `int` | no | `500` | Max items per buffer |
-| `Debug` | `bool` | no | `false` | Verbose SDK logging |
+| Option | Description |
+| --- | --- |
+| `ApiKey` | Project API key. |
+| `Environment` | Deployment environment. |
+| `Release` | App version or commit SHA. |
+| `ServiceName` | Logical service name. |
+| `Host` | Optional ingest host override for self-hosted AllStak. |
+| `CaptureRequestBodies` | Capture redacted request bodies. |
+| `CaptureResponseBodies` | Capture redacted response bodies. |
 
-## Example Usage
+## Privacy
 
-Capture an exception with context:
+The SDK redacts common sensitive headers and body fields. Avoid placing secrets in custom properties.
 
-```csharp
-AllStakClient.Instance.Errors.Capture(ex, new Dictionary<string, object?>
-{
-    ["orderId"] = "ORD-42",
-});
-```
+## Troubleshooting
 
-Send a structured log:
-
-```csharp
-AllStakClient.Instance.Logs.Info("Order processed", new { orderId = "ORD-123" });
-```
-
-Set user and tag:
-
-```csharp
-AllStakClient.Instance.Errors.SetUser(new UserContext { Id = "u_42", Email = "alice@example.com" });
-AllStakClient.Instance.Errors.SetTag("region", "eu-west-1");
-```
-
-## Production Endpoint
-
-Production endpoint: `https://api.allstak.sa`. Override via `Host` for self-hosted deployments:
-
-```csharp
-builder.Services.AddAllStak(opts =>
-{
-    opts.ApiKey = "...";
-    opts.Host = "https://allstak.mycorp.com";
-});
-```
-
-## Links
-
-- Documentation: https://docs.allstak.sa
-- Dashboard: https://app.allstak.sa
-- Source: https://github.com/AllStak/allstak-dotnet
+- No events: confirm `ALLSTAK_API_KEY` is set before the app starts.
+- Missing request telemetry: confirm `app.UseAllStak()` runs before endpoint mapping that should be captured.
+- Short-lived worker: flush before shutdown when possible.
 
 ## License
 
-MIT © AllStak
+MIT

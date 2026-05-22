@@ -12,7 +12,7 @@
     <Authors>AllStak</Authors>
     <Company>AllStak</Company>
     <Product>AllStak .NET SDK</Product>
-    <Description>Experimental AllStak .NET SDK preview. Not production-certified; ASP.NET runtime proof, fail-open certification, wizard automation, and dashboard proof are incomplete.</Description>
+    <Description>AllStak .NET SDK for ASP.NET Core, HttpClient, EF Core request telemetry, tracing, logging, and error capture.</Description>
     <PackageTags>observability;error-tracking;logging;monitoring;apm;tracing;aspnetcore;efcore;httpclient;allstak</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>

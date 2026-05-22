@@ -8,6 +8,9 @@ internal sealed class HttpRequestItem
     [JsonPropertyName("traceId")]
     public string TraceId { get; set; } = "";
 
+    [JsonPropertyName("requestId")]
+    public string? RequestId { get; set; }
+
     [JsonPropertyName("direction")]
     public string Direction { get; set; } = "inbound"; // or "outbound"
 

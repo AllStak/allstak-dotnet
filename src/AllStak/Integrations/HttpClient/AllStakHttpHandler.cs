@@ -31,6 +31,11 @@ public sealed class AllStakHttpHandler : DelegatingHandler
         long responseSize = 0;
         long requestSize = 0;
         string? errorFp = null;
+        var traceId = client.Tracing.GetTraceId();
+        var spanId = client.Tracing.CurrentSpanId;
+        var requestId = Guid.NewGuid().ToString("N");
+
+        global::AllStak.TraceHeaders.Apply(request.Headers, traceId, requestId, spanId);
 
         try
         {
@@ -49,7 +54,9 @@ public sealed class AllStakHttpHandler : DelegatingHandler
                 durationMs: sw.ElapsedMilliseconds,
                 requestSize: requestSize,
                 responseSize: responseSize,
-                traceId: client.Tracing.GetTraceId(),
+                traceId: traceId,
+                requestId: requestId,
+                spanId: spanId,
                 errorFingerprint: errorFp);
             return resp;
         }
@@ -68,7 +75,9 @@ public sealed class AllStakHttpHandler : DelegatingHandler
                     durationMs: sw.ElapsedMilliseconds,
                     requestSize: requestSize,
                     responseSize: responseSize,
-                    traceId: client.Tracing.GetTraceId(),
+                    traceId: traceId,
+                    requestId: requestId,
+                    spanId: spanId,
                     errorFingerprint: errorFp);
             }
             catch { }

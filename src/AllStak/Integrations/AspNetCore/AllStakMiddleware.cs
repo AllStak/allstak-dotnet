@@ -36,18 +36,19 @@ public sealed class AllStakMiddleware
         var sw = Stopwatch.StartNew();
         var startedAt = DateTime.UtcNow;
 
-        // Trace ID — adopt incoming or mint fresh
-        string incomingTrace = context.Request.Headers["X-AllStak-Trace-Id"].ToString();
-        if (string.IsNullOrEmpty(incomingTrace))
-            incomingTrace = context.Request.Headers["traceparent"].ToString();
-
-        if (!string.IsNullOrEmpty(incomingTrace))
-            client.Tracing.SetTraceId(incomingTrace);
-        else
-            client.Tracing.ResetTrace();
-
+        var headers = global::AllStak.TraceHeaders.From(context.Request);
+        client.Tracing.SetTraceId(headers.TraceId);
         var traceId = client.Tracing.GetTraceId();
-        context.Response.Headers["X-AllStak-Trace-Id"] = traceId;
+
+        var span = client.Tracing.StartSpan(
+            "http.server",
+            $"{context.Request.Method} {context.Request.Path}",
+            new Dictionary<string, string>
+            {
+                ["http.method"] = context.Request.Method,
+                ["http.route"] = context.Request.Path.HasValue ? context.Request.Path.Value! : "/",
+            });
+        global::AllStak.TraceHeaders.Apply(context.Response.Headers, traceId, headers.RequestId, span.SpanId);
 
         Exception? captured = null;
         try
@@ -82,13 +83,18 @@ public sealed class AllStakMiddleware
                         requestSize: reqSize,
                         responseSize: respSize,
                         traceId: traceId,
-                        userId: userId);
+                        requestId: headers.RequestId,
+                        userId: userId,
+                        spanId: span.SpanId,
+                        parentSpanId: headers.ParentSpanId);
+                    span.SetTag("http.status_code", context.Response.StatusCode.ToString());
                 }
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "[AllStak] middleware request capture failed");
                 }
             }
+            span.Finish(context.Response.StatusCode >= 500 || captured != null ? "error" : "ok");
 
             // Exception capture
             if (captured != null && options.CaptureUnhandledExceptions)
@@ -113,6 +119,7 @@ public sealed class AllStakMiddleware
                         ["http.host"] = context.Request.Host.HasValue ? context.Request.Host.Value : "localhost",
                         ["http.status"] = reqCtx.StatusCode!,
                         ["traceId"] = traceId,
+                        ["requestId"] = headers.RequestId,
                     };
 
                     _ = client.Errors.CaptureExceptionAsync(
