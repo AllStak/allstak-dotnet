@@ -216,8 +216,30 @@ public class AllStakOptions
     public string? SdkVersionOverride { get; set; }
 
     /// <summary>
-    /// Apply env-var auto-detection for release-tracking metadata. Called by
-    /// the SDK during initialization. Explicit user values always win.
+    /// Gate automatic, CI-free release detection and the SDK-version fallback
+    /// (steps 3 and 4 of release resolution). Default <c>true</c>. When
+    /// <c>false</c>, <see cref="Release"/> stays as provided (explicit value or
+    /// a conventional CI env var) and is left null when neither was set.
+    /// </summary>
+    public bool AutoDetectRelease { get; set; } = true;
+
+    /// <summary>
+    /// Test seam: supplier of the automatically-detected release (step 3).
+    /// Defaults to the cached <c>git describe</c> shell-out. Tests inject a
+    /// deterministic value so detection needs no real repo.
+    /// </summary>
+    internal Func<string?> DetectReleaseFn { get; set; } = ReleaseDetector.DetectCached;
+
+    /// <summary>
+    /// Apply auto-detection for release-tracking metadata. Called by the SDK
+    /// during initialization.
+    ///
+    /// <para>Release resolution, highest precedence first:
+    /// (1) explicit <see cref="Release"/> — always wins;
+    /// (2) conventional CI env vars;
+    /// (3) automatic <c>git describe</c> detection (CI-free);
+    /// (4) the <see cref="SdkVersion"/> constant fallback, so Release is never
+    /// empty. Steps 3 and 4 are gated by <see cref="AutoDetectRelease"/>.</para>
     /// </summary>
     public void ApplyReleaseAutodetect()
     {
@@ -230,8 +252,17 @@ public class AllStakOptions
             }
             return null;
         }
+        // Steps 1+2: explicit value (already set) or CI env vars.
         Release ??= FirstNonEmpty("ALLSTAK_RELEASE",
             "VERCEL_GIT_COMMIT_SHA", "RAILWAY_GIT_COMMIT_SHA", "RENDER_GIT_COMMIT");
+        // Steps 3+4: automatic detection then version fallback (opt-out gated).
+        if (string.IsNullOrEmpty(Release) && AutoDetectRelease)
+        {
+            var detected = DetectReleaseFn?.Invoke();
+            Release = !string.IsNullOrEmpty(detected)
+                ? detected
+                : (SdkVersionOverride ?? SdkVersion);
+        }
         CommitSha ??= FirstNonEmpty("ALLSTAK_COMMIT_SHA", "GIT_COMMIT",
             "VERCEL_GIT_COMMIT_SHA", "RAILWAY_GIT_COMMIT_SHA", "RENDER_GIT_COMMIT");
         Branch ??= FirstNonEmpty("ALLSTAK_BRANCH", "GIT_BRANCH",
