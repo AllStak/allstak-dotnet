@@ -48,7 +48,8 @@ public sealed class AllStakMiddleware
                 ["http.method"] = context.Request.Method,
                 ["http.route"] = context.Request.Path.HasValue ? context.Request.Path.Value! : "/",
             });
-        global::AllStak.TraceHeaders.Apply(context.Response.Headers, traceId, headers.RequestId, span.SpanId);
+        global::AllStak.TraceHeaders.Apply(context.Response.Headers, traceId, headers.RequestId, span.SpanId,
+            sampled: client.Tracing.IsCurrentTraceSampled);
 
         Exception? captured = null;
         try
@@ -120,6 +121,10 @@ public sealed class AllStakMiddleware
                         ["http.status"] = reqCtx.StatusCode!,
                         ["traceId"] = traceId,
                         ["requestId"] = headers.RequestId,
+                        // Mechanism marker — middleware-caught route exceptions are
+                        // unhandled (consistent with the global handler convention).
+                        ["mechanism"] = "aspnetcore.middleware",
+                        ["handled"] = false,
                     };
 
                     _ = client.Errors.CaptureExceptionAsync(

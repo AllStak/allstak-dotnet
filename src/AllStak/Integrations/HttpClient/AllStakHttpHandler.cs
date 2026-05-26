@@ -35,7 +35,8 @@ public sealed class AllStakHttpHandler : DelegatingHandler
         var spanId = client.Tracing.CurrentSpanId;
         var requestId = Guid.NewGuid().ToString("N");
 
-        global::AllStak.TraceHeaders.Apply(request.Headers, traceId, requestId, spanId);
+        global::AllStak.TraceHeaders.Apply(request.Headers, traceId, requestId, spanId,
+            sampled: client.Tracing.IsCurrentTraceSampled);
 
         try
         {

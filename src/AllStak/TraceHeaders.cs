@@ -59,27 +59,30 @@ internal sealed record TraceHeaders(string TraceId, string ParentSpanId, string 
         return string.Join(",", parts);
     }
 
-    public static void Apply(IHeaderDictionary headers, string traceId, string? requestId, string? spanId)
+    /// <summary>W3C traceparent trace-flags: <c>01</c> = sampled, <c>00</c> = not sampled.</summary>
+    private static string TraceFlags(bool sampled) => sampled ? "01" : "00";
+
+    public static void Apply(IHeaderDictionary headers, string traceId, string? requestId, string? spanId, bool sampled = true)
     {
         headers["X-AllStak-Trace-Id"] = traceId;
         if (!string.IsNullOrWhiteSpace(requestId)) headers["X-AllStak-Request-Id"] = requestId;
         if (!string.IsNullOrWhiteSpace(spanId))
         {
             headers["X-AllStak-Span-Id"] = spanId;
-            headers["traceparent"] = $"00-{traceId}-{spanId[..Math.Min(16, spanId.Length)]}-01";
+            headers["traceparent"] = $"00-{traceId}-{spanId[..Math.Min(16, spanId.Length)]}-{TraceFlags(sampled)}";
         }
         headers["baggage"] = MergeBaggage(headers["baggage"].ToString(), traceId, requestId, spanId);
         headers["AllStak-Baggage"] = Baggage(traceId, requestId, spanId);
     }
 
-    public static void Apply(HttpRequestHeaders headers, string traceId, string? requestId, string? spanId)
+    public static void Apply(HttpRequestHeaders headers, string traceId, string? requestId, string? spanId, bool sampled = true)
     {
         Set(headers, "X-AllStak-Trace-Id", traceId);
         if (!string.IsNullOrWhiteSpace(requestId)) Set(headers, "X-AllStak-Request-Id", requestId);
         if (!string.IsNullOrWhiteSpace(spanId))
         {
             Set(headers, "X-AllStak-Span-Id", spanId);
-            Set(headers, "traceparent", $"00-{traceId}-{spanId[..Math.Min(16, spanId.Length)]}-01");
+            Set(headers, "traceparent", $"00-{traceId}-{spanId[..Math.Min(16, spanId.Length)]}-{TraceFlags(sampled)}");
         }
         var existing = headers.TryGetValues("baggage", out var values) ? string.Join(",", values) : null;
         Set(headers, "baggage", MergeBaggage(existing, traceId, requestId, spanId));

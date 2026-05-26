@@ -92,6 +92,12 @@ public sealed class ErrorModule
                 Dist = _options.Dist,
                 Frames = ExtractStructuredFrames(exc),
             };
+
+            // SampleRate drop first, then BeforeSend. Sanitizer runs inside the
+            // transport (PostAsync), so transport is strictly last.
+            if (!ApplySamplingAndBeforeSend(payload, "exception", exc))
+                return null;
+
             var (status, body) = await _transport.PostAsync(Path, payload, ct).ConfigureAwait(false);
             if (status == 202)
             {
@@ -155,6 +161,10 @@ public sealed class ErrorModule
                 Metadata = MergeReleaseTags(metadata),
                 Breadcrumbs = crumbs,
             };
+
+            if (!ApplySamplingAndBeforeSend(payload, "message", null))
+                return null;
+
             var (status, _) = await _transport.PostAsync(Path, payload, ct).ConfigureAwait(false);
             return status == 202 ? exceptionClass : null;
         }
@@ -179,6 +189,62 @@ public sealed class ErrorModule
         foreach (var kv in tags) merged[kv.Key] = kv.Value;
         if (caller != null) foreach (var kv in caller) merged[kv.Key] = kv.Value;
         return merged;
+    }
+
+    /// <summary>
+    /// Apply <see cref="AllStakOptions.SampleRate"/> (drop first) then
+    /// <see cref="AllStakOptions.BeforeSend"/> to an outgoing error payload.
+    /// Returns <c>false</c> when the event must be dropped. Mutations made by
+    /// BeforeSend are copied back onto <paramref name="payload"/>. BeforeSend
+    /// fails open: a throwing callback is logged and the original event is sent.
+    /// </summary>
+    private bool ApplySamplingAndBeforeSend(ErrorPayload payload, string eventType, Exception? original)
+    {
+        // 1) SampleRate — deterministic random drop at capture time.
+        if (!_options.ShouldSampleEvent())
+        {
+            _logger.LogDebug("[AllStak] event dropped by SampleRate (type={Type})", eventType);
+            return false;
+        }
+
+        // 2) BeforeSend — caller may mutate or drop (null).
+        var beforeSend = _options.BeforeSend;
+        if (beforeSend == null) return true;
+
+        var evt = new AllStakEvent(eventType, original)
+        {
+            ExceptionClass = payload.ExceptionClass,
+            Message = payload.Message,
+            Level = payload.Level,
+            TraceId = payload.TraceId,
+            Metadata = payload.Metadata,
+        };
+
+        AllStakEvent? result;
+        try
+        {
+            result = beforeSend(evt);
+        }
+        catch (Exception ex)
+        {
+            // Fail open: send the original event unchanged.
+            _logger.LogWarning(ex, "[AllStak] BeforeSend threw; sending original event (type={Type})", eventType);
+            return true;
+        }
+
+        if (result == null)
+        {
+            _logger.LogDebug("[AllStak] event dropped by BeforeSend (type={Type})", eventType);
+            return false;
+        }
+
+        // Copy back mutable fields.
+        payload.ExceptionClass = result.ExceptionClass ?? payload.ExceptionClass;
+        payload.Message = result.Message;
+        payload.Level = result.Level;
+        payload.TraceId = result.TraceId;
+        payload.Metadata = result.Metadata;
+        return true;
     }
 
     private static List<string> ExtractFrames(Exception exc)

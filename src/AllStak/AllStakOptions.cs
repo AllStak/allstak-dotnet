@@ -115,9 +115,85 @@ public class AllStakOptions
     public int MaxRetries { get; set; } = 5;
 
     /// <summary>
-    /// If <c>true</c>, automatically capture unhandled exceptions from ASP.NET Core routes.
+    /// If <c>true</c>, automatically capture unhandled exceptions. This drives
+    /// both the ASP.NET Core middleware (per-request route exceptions) and the
+    /// process-wide <see cref="AppDomain.UnhandledException"/> handler that
+    /// catches crashes in background threads / workers outside any request.
     /// </summary>
     public bool CaptureUnhandledExceptions { get; set; } = true;
+
+    /// <summary>
+    /// If <c>true</c>, subscribe to <see cref="System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/>
+    /// and capture faults from <see cref="System.Threading.Tasks.Task"/>s whose
+    /// exceptions were never observed. Default <c>true</c>.
+    /// </summary>
+    public bool CaptureUnobservedTaskExceptions { get; set; } = true;
+
+    /// <summary>
+    /// If <c>true</c>, the SDK calls <c>e.SetObserved()</c> on captured
+    /// <see cref="System.Threading.Tasks.TaskScheduler.UnobservedTaskException"/>
+    /// events, suppressing the runtime's default escalation. Default <c>false</c>
+    /// to preserve existing runtime behavior — the SDK observes telemetry without
+    /// changing how the process reacts to unobserved task faults.
+    /// </summary>
+    public bool MarkUnobservedTaskExceptionsObserved { get; set; } = false;
+
+    /// <summary>
+    /// Milliseconds allotted to the best-effort synchronous flush performed when
+    /// an <see cref="AppDomain.UnhandledException"/> fires (the process is likely
+    /// terminating). Kept short so we don't block shutdown. Default 2000 ms.
+    /// </summary>
+    public int ShutdownFlushTimeoutMs { get; set; } = 2_000;
+
+    /// <summary>
+    /// Optional hook invoked once for every error / message event immediately
+    /// before it is handed to the transport (and before the PII sanitizer runs).
+    /// Return the (possibly mutated) event to send it, or <c>null</c> to drop it.
+    /// If the callback throws, the SDK fails open: it logs and sends the original
+    /// event unchanged.
+    /// </summary>
+    public Func<AllStakEvent, AllStakEvent?>? BeforeSend { get; set; }
+
+    /// <summary>
+    /// Probability (0.0–1.0) that any given error / message event is kept.
+    /// Applied at capture time with a deterministic random draw <i>before</i>
+    /// <see cref="BeforeSend"/>. <c>1.0</c> (default) keeps everything; <c>0.0</c>
+    /// drops everything. Values outside the range are clamped.
+    /// </summary>
+    public double SampleRate { get; set; } = 1.0;
+
+    /// <summary>
+    /// Probability (0.0–1.0) that a span / trace is sampled. When set, span
+    /// creation is sampled and the propagated <c>traceparent</c> sampled flag
+    /// reflects the decision. <c>null</c> (default) preserves existing behavior
+    /// (every span recorded, <c>traceparent</c> always marked sampled).
+    /// </summary>
+    public double? TracesSampleRate { get; set; }
+
+    /// <summary>
+    /// Test seam: source of the [0,1) random draw used for sampling decisions.
+    /// Defaults to a shared thread-safe RNG. Tests inject a deterministic value.
+    /// </summary>
+    internal Func<double> SampleRng { get; set; } = static () => Random.Shared.NextDouble();
+
+    /// <summary>Returns true if an error/message event survives <see cref="SampleRate"/>.</summary>
+    internal bool ShouldSampleEvent()
+    {
+        var rate = SampleRate;
+        if (rate >= 1.0) return true;
+        if (rate <= 0.0) return false;
+        return SampleRng() < rate;
+    }
+
+    /// <summary>Returns true if a span survives <see cref="TracesSampleRate"/> (always true when null).</summary>
+    internal bool ShouldSampleTrace()
+    {
+        var rate = TracesSampleRate;
+        if (rate is null) return true;
+        if (rate.Value >= 1.0) return true;
+        if (rate.Value <= 0.0) return false;
+        return SampleRng() < rate.Value;
+    }
 
     /// <summary>
     /// If <c>true</c>, automatically capture inbound HTTP request telemetry via the middleware.

@@ -15,6 +15,7 @@ public sealed class TracingModule : IDisposable
     private readonly FlushBuffer<SpanPayload> _buffer;
     private readonly AsyncLocal<string?> _currentTraceId = new();
     private readonly AsyncLocal<Stack<string>?> _spanStack = new();
+    private readonly AsyncLocal<bool?> _currentSampled = new();
 
     internal TracingModule(HttpTransport transport, AllStakOptions options, ILogger logger)
     {
@@ -32,11 +33,35 @@ public sealed class TracingModule : IDisposable
         return _currentTraceId.Value;
     }
 
-    public void SetTraceId(string traceId) => _currentTraceId.Value = traceId;
+    public void SetTraceId(string traceId)
+    {
+        _currentTraceId.Value = traceId;
+        // New trace adopted — re-decide sampling lazily.
+        _currentSampled.Value = null;
+    }
+
     public void ResetTrace()
     {
         _currentTraceId.Value = null;
         _spanStack.Value = null;
+        _currentSampled.Value = null;
+    }
+
+    /// <summary>
+    /// Whether the current trace is sampled. Decided once per trace from
+    /// <see cref="AllStakOptions.TracesSampleRate"/> (null = always sampled,
+    /// preserving prior behavior) and cached for trace-wide consistency.
+    /// Drives both span recording and the propagated <c>traceparent</c> flag.
+    /// </summary>
+    public bool IsCurrentTraceSampled
+    {
+        get
+        {
+            if (_currentSampled.Value is bool decided) return decided;
+            var sampled = _options.ShouldSampleTrace();
+            _currentSampled.Value = sampled;
+            return sampled;
+        }
     }
 
     public string? CurrentSpanId => _spanStack.Value?.Count > 0 ? _spanStack.Value.Peek() : null;
@@ -64,6 +89,10 @@ public sealed class TracingModule : IDisposable
         {
             try { _spanStack.Value.Pop(); } catch { }
         }
+        // TracesSampleRate: drop the span payload when the current trace was not
+        // sampled. The Span object still exists (ids/headers stay valid) so trace
+        // propagation is unaffected — only ingestion is skipped.
+        if (!IsCurrentTraceSampled) return;
         _buffer.Push(span.ToPayload());
     }
 

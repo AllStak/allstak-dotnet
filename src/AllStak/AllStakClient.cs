@@ -27,6 +27,7 @@ public sealed class AllStakClient : IDisposable
     internal readonly AllStakOptions Options;
     private readonly HttpTransport _transport;
     private readonly ILogger _logger;
+    private readonly GlobalExceptionHandler _globalHandler;
 
     /// <summary>Error capture module.</summary>
     public ErrorModule Errors { get; }
@@ -56,6 +57,12 @@ public sealed class AllStakClient : IDisposable
         Tracing = new TracingModule(_transport, options, _logger);
         Database = new DatabaseModule(_transport, options, _logger);
         Cron = new CronModule(_transport, options, _logger);
+
+        // Process-wide capture for crashes outside ASP.NET requests (background
+        // workers, fire-and-forget tasks). Idempotent + opt-out via options.
+        _globalHandler = new GlobalExceptionHandler(Errors, FlushAllAsync, options, _logger);
+        if (options.CaptureUnhandledExceptions || options.CaptureUnobservedTaskExceptions)
+            _globalHandler.Subscribe();
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
     }
@@ -125,6 +132,7 @@ public sealed class AllStakClient : IDisposable
     /// <summary>Best-effort shutdown — flushes all buffers and disposes resources.</summary>
     public void Shutdown()
     {
+        try { _globalHandler.Unsubscribe(); } catch { }
         try { FlushAllAsync().GetAwaiter().GetResult(); } catch { }
         Logs.Dispose();
         Http.Dispose();
