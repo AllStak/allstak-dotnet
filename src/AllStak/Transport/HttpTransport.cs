@@ -98,10 +98,8 @@ internal sealed class HttpTransport
         }
         catch (Exception sanErr)
         {
-            // Fail-open: if sanitizer crashes on something unexpected, never
-            // block telemetry — but log loud so we can find it.
-            _logger.LogWarning(sanErr, "[AllStak] sanitizer failed; sending raw payload as fallback (path={Path})", path);
-            scrubbedJson = rawJson;
+            _logger.LogWarning(sanErr, "[AllStak] sanitizer failed; dropping payload (path={Path})", path);
+            return (0, string.Empty);
         }
 
         Exception? lastExc = null;
