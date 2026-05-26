@@ -80,6 +80,13 @@ public class AllStakOptions
     public string? Release { get; set; }
 
     /// <summary>
+    /// Register the resolved release with AllStak at runtime startup via
+    /// <c>/ingest/v1/releases</c>, without requiring CI/CD integration.
+    /// Best-effort and fail-open. Default true.
+    /// </summary>
+    public bool AutoRegisterRelease { get; set; } = true;
+
+    /// <summary>
     /// Logical service name attached to spans and logs.
     /// </summary>
     public string ServiceName { get; set; } = "dotnet-service";

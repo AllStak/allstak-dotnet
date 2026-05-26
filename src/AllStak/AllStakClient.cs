@@ -47,9 +47,11 @@ public sealed class AllStakClient : IDisposable
         Options = options ?? throw new ArgumentNullException(nameof(options));
         if (string.IsNullOrWhiteSpace(options.ApiKey))
             throw new ArgumentException("AllStakOptions.ApiKey is required", nameof(options));
+        options.ApplyReleaseAutodetect();
 
         _logger = logger ?? NullLogger.Instance;
         _transport = new HttpTransport(options, _logger);
+        RegisterRuntimeRelease();
 
         Errors = new ErrorModule(_transport, options, _logger);
         Logs = new LogModule(_transport, options, _logger);
@@ -65,6 +67,44 @@ public sealed class AllStakClient : IDisposable
             _globalHandler.Subscribe();
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Shutdown();
+    }
+
+    private void RegisterRuntimeRelease()
+    {
+        if (!Options.AutoRegisterRelease ||
+            string.IsNullOrWhiteSpace(Options.Release) ||
+            IsLikelyTestHost())
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _transport.PostAsync("/ingest/v1/releases", new
+                {
+                    version = Options.Release,
+                    environment = Options.Environment ?? "production",
+                    commitSha = Options.CommitSha,
+                    branch = Options.Branch,
+                    author = $"{AllStakOptions.SdkName}/{AllStakOptions.SdkVersion}",
+                    message = "Registered automatically by AllStak .NET SDK at runtime",
+                }).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[AllStak] runtime release registration failed");
+            }
+        });
+    }
+
+    private static bool IsLikelyTestHost()
+    {
+        var name = AppDomain.CurrentDomain.FriendlyName;
+        return name.Contains("testhost", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("vstest", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("xunit", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Initialize the singleton. Subsequent calls return the existing instance.</summary>
