@@ -7,7 +7,36 @@ public class AllStakOptions
 {
     /// <summary>SDK identity sent on the wire as <c>sdk.name</c> / <c>sdk.version</c>.</summary>
     public const string SdkName = "allstak-dotnet";
-    public const string SdkVersion = "1.2.0";
+
+    /// <summary>
+    /// SDK version reported on the wire as <c>sdk.version</c>. Sourced from the
+    /// assembly's informational version (driven by the csproj <c>&lt;Version&gt;</c>)
+    /// so it can never drift from the published package. Falls back to a constant
+    /// if the attribute is unavailable.
+    /// </summary>
+    public static readonly string SdkVersion = ResolveSdkVersion();
+
+    private static string ResolveSdkVersion()
+    {
+        var asm = typeof(AllStakOptions).Assembly;
+        // InformationalVersion mirrors csproj <Version> (e.g. "0.1.2"); it may
+        // carry a "+<commit>" SourceLink suffix, which we strip for the wire.
+        var info = asm
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            is object[] attrs && attrs.Length > 0
+            ? ((System.Reflection.AssemblyInformationalVersionAttribute)attrs[0]).InformationalVersion
+            : null;
+        if (!string.IsNullOrEmpty(info))
+        {
+            var plus = info!.IndexOf('+');
+            return plus >= 0 ? info[..plus] : info;
+        }
+        // Fall back to the file version (e.g. "0.1.2.0" → "0.1.2").
+        var ver = asm.GetName().Version;
+        if (ver != null)
+            return $"{ver.Major}.{ver.Minor}.{ver.Build}";
+        return "0.1.2";
+    }
 
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using AllStak.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -55,6 +56,16 @@ public sealed class HttpTransportTests
             {
                 Content = new StringContent(body),
             });
+        }
+
+        public void EnqueueWithRetryAfter(HttpStatusCode status, TimeSpan retryAfter, string body = "")
+        {
+            var msg = new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body),
+            };
+            msg.Headers.RetryAfter = new RetryConditionHeaderValue(retryAfter);
+            _responses.Enqueue(msg);
         }
 
         protected override Task<HttpResponseMessage> SendAsync(
@@ -220,5 +231,75 @@ public sealed class HttpTransportTests
             () => transport.PostAsync("/test", new { }));
 
         Assert.Equal(1, handler.CallCount);
+    }
+
+    // ── Retry-After parsing ──────────────────────────────────────────
+
+    [Fact]
+    public void ParseRetryAfter_Null_ReturnsZero()
+    {
+        Assert.Equal(TimeSpan.Zero,
+            HttpTransport.ParseRetryAfter(null, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_DeltaSeconds_ReturnsDelta()
+    {
+        var header = new RetryConditionHeaderValue(TimeSpan.FromSeconds(2));
+        Assert.Equal(TimeSpan.FromSeconds(2),
+            HttpTransport.ParseRetryAfter(header, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_HttpDate_ReturnsDeltaFromNow()
+    {
+        var now = new DateTimeOffset(2026, 5, 26, 12, 0, 0, TimeSpan.Zero);
+        var when = now.AddSeconds(30);
+        var header = new RetryConditionHeaderValue(when);
+
+        // HTTP-date has 1s resolution, so allow a small tolerance.
+        var result = HttpTransport.ParseRetryAfter(header, now);
+        Assert.InRange(result, TimeSpan.FromSeconds(29), TimeSpan.FromSeconds(31));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_PastDate_ReturnsZero()
+    {
+        var now = new DateTimeOffset(2026, 5, 26, 12, 0, 0, TimeSpan.Zero);
+        var header = new RetryConditionHeaderValue(now.AddSeconds(-30));
+        Assert.Equal(TimeSpan.Zero, HttpTransport.ParseRetryAfter(header, now));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_OverFiveMinutes_ClampedToFiveMinutes()
+    {
+        var header = new RetryConditionHeaderValue(TimeSpan.FromSeconds(600)); // 10 min
+        Assert.Equal(TimeSpan.FromMinutes(5),
+            HttpTransport.ParseRetryAfter(header, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void ParseRetryAfter_DateOverFiveMinutes_ClampedToFiveMinutes()
+    {
+        var now = new DateTimeOffset(2026, 5, 26, 12, 0, 0, TimeSpan.Zero);
+        var header = new RetryConditionHeaderValue(now.AddMinutes(10));
+        Assert.Equal(TimeSpan.FromMinutes(5),
+            HttpTransport.ParseRetryAfter(header, now));
+    }
+
+    [Fact]
+    public async Task Retries_On429_WithRetryAfter()
+    {
+        // A 429 carrying Retry-After: 0 (so the test does not actually sleep)
+        // must be treated as retryable, then succeed.
+        var handler = new FakeHandler();
+        handler.EnqueueWithRetryAfter(HttpStatusCode.TooManyRequests, TimeSpan.Zero, "rate limited");
+        handler.Enqueue(HttpStatusCode.OK, "ok");
+        var transport = CreateWithHandler(handler, maxRetries: 3);
+
+        var (status, _) = await transport.PostAsync("/test", new { });
+
+        Assert.Equal(200, status);
+        Assert.Equal(2, handler.CallCount);
     }
 }

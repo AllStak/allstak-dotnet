@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -30,6 +31,9 @@ internal sealed class HttpTransport
     };
 
     private static readonly HashSet<int> NonRetryableStatuses = new() { 400, 401, 403, 404, 422 };
+
+    /// <summary>Upper bound on an honored <c>Retry-After</c> delay (5 minutes).</summary>
+    internal static readonly TimeSpan MaxRetryAfter = TimeSpan.FromMinutes(5);
 
     private readonly HttpClient _http;
     private readonly string _baseUrl;
@@ -105,6 +109,8 @@ internal sealed class HttpTransport
 
         for (int attempt = 1; attempt <= _maxRetries; attempt++)
         {
+            // Server-directed delay (429/503 Retry-After). Zero when absent/invalid.
+            TimeSpan retryAfterDelay = TimeSpan.Zero;
             try
             {
                 using var content = new StringContent(scrubbedJson, Encoding.UTF8, "application/json");
@@ -129,7 +135,12 @@ internal sealed class HttpTransport
                 if (lastStatus < 400)
                     return (lastStatus, body);
 
-                // 5xx — retry
+                // 429 (rate limited) / 503 (unavailable) may carry a Retry-After
+                // header telling us exactly how long to wait. Honor it when present.
+                if (lastStatus == 429 || lastStatus == 503)
+                    retryAfterDelay = ParseRetryAfter(resp.Headers.RetryAfter, DateTimeOffset.UtcNow);
+
+                // 5xx (and 429) — retry
             }
             catch (AllStakAuthException)
             {
@@ -148,9 +159,19 @@ internal sealed class HttpTransport
 
             if (attempt < _maxRetries)
             {
-                var backoff = BackoffDelays[Math.Min(attempt - 1, BackoffDelays.Length - 1)];
-                var jitter = TimeSpan.FromMilliseconds(_jitter.Next(0, 500));
-                await Task.Delay(backoff + jitter, ct).ConfigureAwait(false);
+                TimeSpan delay;
+                if (retryAfterDelay > TimeSpan.Zero)
+                {
+                    // Server told us when to come back — respect it (already clamped).
+                    delay = retryAfterDelay;
+                }
+                else
+                {
+                    var backoff = BackoffDelays[Math.Min(attempt - 1, BackoffDelays.Length - 1)];
+                    var jitter = TimeSpan.FromMilliseconds(_jitter.Next(0, 500));
+                    delay = backoff + jitter;
+                }
+                await Task.Delay(delay, ct).ConfigureAwait(false);
             }
         }
 
@@ -174,5 +195,41 @@ internal sealed class HttpTransport
         }
         throw new AllStakTransportException(
             $"All {_maxRetries} attempts failed for POST {path}. Last status={lastStatus}, last error={lastExc?.Message}");
+    }
+
+    /// <summary>
+    /// Convert an HTTP <c>Retry-After</c> header into a wait delay. The header can be
+    /// either a delta in seconds (<c>Retry-After: 2</c>) or an absolute HTTP date
+    /// (<c>Retry-After: Wed, 21 Oct 2015 07:28:00 GMT</c>); .NET exposes both via
+    /// <see cref="RetryConditionHeaderValue.Delta"/> and <see cref="RetryConditionHeaderValue.Date"/>.
+    /// Returns <see cref="TimeSpan.Zero"/> when the header is absent or invalid (caller
+    /// falls back to jittered backoff). The result is clamped to
+    /// <see cref="MaxRetryAfter"/> (5 minutes) and never negative.
+    /// </summary>
+    /// <param name="retryAfter">The parsed header value, or <c>null</c> if absent.</param>
+    /// <param name="now">Reference "now" used to resolve a date-form header into a delta.</param>
+    internal static TimeSpan ParseRetryAfter(RetryConditionHeaderValue? retryAfter, DateTimeOffset now)
+    {
+        if (retryAfter is null)
+            return TimeSpan.Zero;
+
+        TimeSpan delay;
+        if (retryAfter.Delta is TimeSpan delta)
+        {
+            delay = delta;
+        }
+        else if (retryAfter.Date is DateTimeOffset date)
+        {
+            delay = date - now;
+        }
+        else
+        {
+            return TimeSpan.Zero;
+        }
+
+        if (delay <= TimeSpan.Zero)
+            return TimeSpan.Zero;
+
+        return delay > MaxRetryAfter ? MaxRetryAfter : delay;
     }
 }
