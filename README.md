@@ -72,7 +72,6 @@ builder.Services.AddHttpClient("payments")
 | `Environment` | Deployment environment. |
 | `Release` | App version or commit SHA. |
 | `ServiceName` | Logical service name. |
-| `Host` | Optional ingest host override for self-hosted AllStak. |
 | `CaptureRequestBodies` | Capture redacted request bodies. |
 | `CaptureResponseBodies` | Capture redacted response bodies. |
 
