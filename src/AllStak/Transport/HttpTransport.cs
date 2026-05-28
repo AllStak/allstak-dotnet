@@ -32,6 +32,19 @@ internal sealed class HttpTransport
 
     private static readonly HashSet<int> NonRetryableStatuses = new() { 400, 401, 403, 404, 422 };
 
+    /// <summary>
+    /// Ingest paths that are <b>best-effort live-only</b> and must NOT be spooled to
+    /// the offline cache. A replayed stale session would skew durations / crash-free
+    /// math, and release registration is a one-shot startup control call — neither is
+    /// buffered telemetry. Only error / log / span / http / db telemetry is persisted.
+    /// </summary>
+    private static readonly HashSet<string> NonPersistablePaths = new(StringComparer.Ordinal)
+    {
+        "/ingest/v1/sessions/start",
+        "/ingest/v1/sessions/end",
+        "/ingest/v1/releases",
+    };
+
     /// <summary>Upper bound on an honored <c>Retry-After</c> delay (5 minutes).</summary>
     internal static readonly TimeSpan MaxRetryAfter = TimeSpan.FromMinutes(5);
 
@@ -43,9 +56,13 @@ internal sealed class HttpTransport
     private readonly int _maxRetries;
     private readonly ILogger _logger;
     private readonly Random _jitter = new();
+    private readonly FileSystemCache? _cache;
     private volatile bool _disabled;
 
     public bool IsDisabled => _disabled;
+
+    /// <summary>The offline spool, or <c>null</c> when offline caching is disabled.</summary>
+    internal FileSystemCache? Cache => _cache;
 
     public HttpTransport(AllStakOptions options, ILogger logger)
     {
@@ -59,6 +76,20 @@ internal sealed class HttpTransport
         {
             Timeout = TimeSpan.FromMilliseconds(options.ConnectTimeoutMs + options.ReadTimeoutMs),
         };
+        // Offline/persistent queue (Sentry-style): scrubbed envelopes that cannot be
+        // delivered are spooled to disk and replayed on the next init. Fully fail-open
+        // — a non-writable dir simply yields IsAvailable=false and we no-op.
+        if (options.EnableOfflineCache)
+        {
+            var dir = string.IsNullOrWhiteSpace(options.CacheDirectoryPath)
+                ? FileSystemCache.DefaultDirectory()
+                : options.CacheDirectoryPath!;
+            _cache = new FileSystemCache(
+                dir, logger,
+                maxEnvelopes: options.OfflineCacheMaxEnvelopes,
+                maxBytes: options.OfflineCacheMaxBytes,
+                maxAge: TimeSpan.FromHours(Math.Max(0, options.OfflineCacheMaxAgeHours)));
+        }
         // Note: no DefaultRequestHeaders.X-AllStak-Key — set per-request via
         // ResolveApiKey() so ApiKeyProvider can rotate without restart.
     }
@@ -83,12 +114,11 @@ internal sealed class HttpTransport
         if (_disabled)
             throw new AllStakAuthException("SDK disabled due to invalid API key");
 
-        var url = $"{_baseUrl}{path}";
-
         // P0-C — sanitize the wire payload BEFORE serializing it onto the network.
         // Serialize → parse → recursive scrub → reserialize. The chokepoint here
         // protects every telemetry type (errors, logs, http, db, traces) with
-        // one wire-in.
+        // one wire-in. Critically, the offline cache only ever sees this already-
+        // scrubbed body, so unredacted secrets never touch disk.
         var rawJson = JsonSerializer.Serialize(payload);
         string scrubbedJson;
         try
@@ -101,6 +131,26 @@ internal sealed class HttpTransport
             _logger.LogWarning(sanErr, "[AllStak] sanitizer failed; dropping payload (path={Path})", path);
             return (0, string.Empty);
         }
+
+        // persistOnFailure: spool the scrubbed body when delivery ultimately fails.
+        return await SendScrubbedAsync(path, scrubbedJson, persistOnFailure: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Re-send an already-scrubbed envelope read back from the offline cache. Goes
+    /// through the same retry/backoff/circuit-breaker as a live send, but does NOT
+    /// re-persist on failure (it is already on disk; the drainer leaves it in place).
+    /// </summary>
+    internal Task<(int status, string body)> SendCachedAsync(string path, string scrubbedBody, CancellationToken ct = default)
+        => SendScrubbedAsync(path, scrubbedBody, persistOnFailure: false, ct);
+
+    private async Task<(int status, string body)> SendScrubbedAsync(
+        string path, string scrubbedJson, bool persistOnFailure, CancellationToken ct)
+    {
+        if (_disabled)
+            throw new AllStakAuthException("SDK disabled due to invalid API key");
+
+        var url = $"{_baseUrl}{path}";
 
         Exception? lastExc = null;
         int lastStatus = 0;
@@ -173,12 +223,22 @@ internal sealed class HttpTransport
             }
         }
 
+        // Offline/persistent queue: instead of losing this telemetry, spool the
+        // already-scrubbed body to disk so the next init can replay it. Only for
+        // live sends (not drained ones) and only for persistable telemetry paths
+        // (sessions/releases are best-effort live-only). Fully fail-open.
+        bool persisted = false;
+        if (persistOnFailure && _cache != null && _cache.IsAvailable && !NonPersistablePaths.Contains(path))
+        {
+            persisted = _cache.Persist(path, scrubbedJson);
+        }
+
         // P0-I — final failure is now visible.
         // 1) Log at Warning (not Debug) so it shows up in default prod logging.
         _logger.LogWarning(
             lastExc,
-            "[AllStak] all {Attempts} attempts failed for POST {Path}. Last status={Status}. Event lost.",
-            _maxRetries, path, lastStatus);
+            "[AllStak] all {Attempts} attempts failed for POST {Path}. Last status={Status}. {Disposition}",
+            _maxRetries, path, lastStatus, persisted ? "Spooled to offline cache." : "Event lost.");
         // 2) Surface to the host app's metrics pipeline if they registered a handler.
         if (_onTransportError != null)
         {
@@ -193,6 +253,53 @@ internal sealed class HttpTransport
         }
         throw new AllStakTransportException(
             $"All {_maxRetries} attempts failed for POST {path}. Last status={lastStatus}, last error={lastExc?.Message}");
+    }
+
+    /// <summary>
+    /// Replay every envelope spooled to the offline cache by a previous process /
+    /// outage, oldest first, through the live transport (same retry/backoff/circuit
+    /// breaker). An entry is removed only once it is <b>accepted</b> (2xx) or is
+    /// <b>permanently undeliverable</b> (a 4xx other than 429); transient failures
+    /// (network, 5xx, 429, exhausted retries) leave it on disk for the next attempt.
+    /// Fully fail-open and safe to fire-and-forget on init — it never throws.
+    /// </summary>
+    public async Task DrainCacheAsync(CancellationToken ct = default)
+    {
+        var cache = _cache;
+        if (cache is null || !cache.IsAvailable) return;
+
+        IReadOnlyList<CachedEnvelope> envelopes;
+        try { envelopes = cache.Load(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "[AllStak] offline cache load failed"); return; }
+        if (envelopes.Count == 0) return;
+
+        _logger.LogDebug("[AllStak] draining {Count} offline envelope(s)", envelopes.Count);
+
+        foreach (var env in envelopes)
+        {
+            if (_disabled) return; // 401 disabled mid-drain — stop; leave the rest spooled.
+            if (ct.IsCancellationRequested) return;
+            try
+            {
+                var (status, _) = await SendCachedAsync(env.Path, env.Body, ct).ConfigureAwait(false);
+                // Accepted (2xx) or permanently rejected (4xx, but NOT 429) → remove.
+                bool accepted = status is >= 200 and < 300;
+                bool permanentReject = status is >= 400 and < 500 && status != 429;
+                if (accepted || permanentReject)
+                    cache.Remove(env.File);
+                // else: 5xx / 429 / 0 — leave on disk for the next drain.
+            }
+            catch (AllStakAuthException)
+            {
+                // SDK disabled (invalid key). Keep everything spooled; stop draining.
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Network / exhausted retries — leave this envelope on disk, try next.
+                _logger.LogDebug(ex, "[AllStak] offline replay failed (path={Path}); kept on disk", env.Path);
+            }
+        }
     }
 
     /// <summary>

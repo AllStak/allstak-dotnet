@@ -112,6 +112,44 @@ public class AllStakOptions
     public int BufferSize { get; set; } = 500;
 
     /// <summary>
+    /// Enable the Sentry-style offline / persistent event queue: telemetry that
+    /// cannot be delivered (network outage, retries exhausted, or process shutting
+    /// down with events still buffered) is written — <b>already PII-scrubbed</b> —
+    /// to a filesystem spool directory and replayed on the next SDK init. Survives a
+    /// process / app restart. Default <c>true</c>; set <c>false</c> to keep the
+    /// existing in-memory-only behavior. Always degrades silently to in-memory when
+    /// the spool directory is not writable (read-only FS, serverless / sandboxed,
+    /// edge runtimes). Session lifecycle and release-registration calls are never
+    /// persisted (they are best-effort live-only).
+    /// </summary>
+    public bool EnableOfflineCache { get; set; } = true;
+
+    /// <summary>
+    /// Directory used for the offline event spool. When unset (default) the SDK
+    /// uses a per-app folder under the OS local-app-data (or temp) directory. Point
+    /// this at a writable, app-private path on hosts with a restricted filesystem.
+    /// </summary>
+    public string? CacheDirectoryPath { get; set; }
+
+    /// <summary>
+    /// Maximum number of envelopes retained in the offline spool. When full the
+    /// OLDEST are dropped. Default 100.
+    /// </summary>
+    public int OfflineCacheMaxEnvelopes { get; set; } = 100;
+
+    /// <summary>
+    /// Maximum total bytes retained in the offline spool. When exceeded the OLDEST
+    /// envelopes are dropped until the store fits. Default 5 MB.
+    /// </summary>
+    public long OfflineCacheMaxBytes { get; set; } = 5L * 1024 * 1024;
+
+    /// <summary>
+    /// Maximum age (hours) of a spooled envelope. Older entries are evicted on the
+    /// next persist / drain so stale telemetry is never replayed. Default 48 h.
+    /// </summary>
+    public double OfflineCacheMaxAgeHours { get; set; } = 48;
+
+    /// <summary>
     /// Enable verbose SDK debug logging to ILogger. Default false.
     /// </summary>
     public bool Debug { get; set; } = false;

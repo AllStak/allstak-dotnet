@@ -76,6 +76,13 @@ public sealed class AllStakClient : IDisposable
             catch (Exception ex) { _logger.LogDebug(ex, "[AllStak] session start failed"); }
         }
 
+        // Offline/persistent queue replay: asynchronously re-send any telemetry
+        // spooled to disk by a previous process / outage. Fire-and-forget so init
+        // never blocks on the network; fully fail-open; skipped under a unit-test
+        // host so test runs don't replay another run's spool.
+        if (options.EnableOfflineCache && !IsLikelyTestHost())
+            DrainOfflineCache();
+
         // Process-wide capture for crashes outside ASP.NET requests (background
         // workers, fire-and-forget tasks). Idempotent + opt-out via options.
         _globalHandler = new GlobalExceptionHandler(Errors, FlushAllAsync, options, _logger);
@@ -112,6 +119,20 @@ public sealed class AllStakClient : IDisposable
             {
                 _logger.LogDebug(ex, "[AllStak] runtime release registration failed");
             }
+        });
+    }
+
+    /// <summary>
+    /// Fire-and-forget replay of the offline event spool through the live transport.
+    /// Never throws; logs at debug on failure. Separated out so the constructor stays
+    /// readable and so it can run after a short delay if the transport is warming up.
+    /// </summary>
+    private void DrainOfflineCache()
+    {
+        _ = Task.Run(async () =>
+        {
+            try { await _transport.DrainCacheAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "[AllStak] offline cache drain failed"); }
         });
     }
 
