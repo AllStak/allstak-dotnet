@@ -43,8 +43,6 @@ namespace AllStak
             "bearer",
             "jwt",
             "session",
-            "sessionid",
-            "session_id",
             "secret",
             "credit_card",
             "card_number",
@@ -52,6 +50,23 @@ namespace AllStak
             "ssn",
             "csrf",
         };
+
+        /// <summary>
+        /// Exact keys that are non-sensitive correlation identifiers and must never
+        /// be redacted, even though they contain a denylist substring. The
+        /// release-health session id is an opaque random correlation id (not a
+        /// credential); redacting it would break server-side session correlation
+        /// and crash-free tracking. Genuine session secrets (e.g.
+        /// <c>session_token</c>, <c>session_cookie</c>) are NOT allowlisted and
+        /// stay redacted via their <c>token</c> / <c>cookie</c> substrings.
+        /// Matched case-insensitively on the exact (full) key.
+        /// </summary>
+        private static readonly HashSet<string> AllowlistExactKeys =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                "sessionid",
+                "session_id",
+            };
 
         /// <summary>Sanitize a dictionary payload. Returns a sanitized copy.</summary>
         public static IDictionary<string, object?> Sanitize(
@@ -98,6 +113,9 @@ namespace AllStak
 
         private static bool IsSensitive(string key, List<string> denylist)
         {
+            // Exact-key allowlist wins over the substring denylist so opaque
+            // correlation ids (e.g. the release-health sessionId) survive.
+            if (AllowlistExactKeys.Contains(key)) return false;
             var k = key.ToLowerInvariant();
             foreach (var term in denylist)
             {

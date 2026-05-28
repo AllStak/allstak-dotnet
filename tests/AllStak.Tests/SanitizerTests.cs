@@ -32,6 +32,39 @@ public class SanitizerTests
     }
 
     [Fact]
+    public void DoesNotRedact_SessionCorrelationId()
+    {
+        // The release-health sessionId is an opaque correlation id, not a secret.
+        // It must survive sanitization so the backend can correlate sessions and
+        // mark them errored/crashed — even though it contains the "session" term.
+        var input = new Dictionary<string, object?>
+        {
+            ["sessionId"] = "7222575d-0bec-470e-b8be-ddc5c212ad6c",
+            ["session_id"] = "abc-123",
+        };
+        var output = AllStak.Sanitizer.Sanitize(input);
+        Assert.Equal("7222575d-0bec-470e-b8be-ddc5c212ad6c", output["sessionId"]);
+        Assert.Equal("abc-123", output["session_id"]);
+    }
+
+    [Fact]
+    public void StillRedacts_SessionSecrets()
+    {
+        // Genuine session secrets are NOT allowlisted: they keep matching the
+        // token / cookie / secret denylist substrings.
+        var input = new Dictionary<string, object?>
+        {
+            ["session_token"] = "t",
+            ["session_cookie"] = "c",
+            ["session_secret"] = "s",
+        };
+        var output = AllStak.Sanitizer.Sanitize(input);
+        Assert.Equal(R, output["session_token"]);
+        Assert.Equal(R, output["session_cookie"]);
+        Assert.Equal(R, output["session_secret"]);
+    }
+
+    [Fact]
     public void Recurses_Into_NestedDict()
     {
         var input = new Dictionary<string, object?>

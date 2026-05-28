@@ -1,5 +1,6 @@
 using AllStak.Models;
 using AllStak.Modules;
+using AllStak.Session;
 using AllStak.Transport;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -28,6 +29,7 @@ public sealed class AllStakClient : IDisposable
     private readonly HttpTransport _transport;
     private readonly ILogger _logger;
     private readonly GlobalExceptionHandler _globalHandler;
+    private readonly SessionTracker? _session;
 
     /// <summary>Error capture module.</summary>
     public ErrorModule Errors { get; }
@@ -59,6 +61,20 @@ public sealed class AllStakClient : IDisposable
         Tracing = new TracingModule(_transport, options, _logger);
         Database = new DatabaseModule(_transport, options, _logger);
         Cron = new CronModule(_transport, options, _logger);
+
+        // Release-health session: one session per process / app-launch. Started
+        // here (after release is resolved) so the start envelope carries the
+        // resolved release; ended on graceful shutdown. Never sampled, fail-open,
+        // and skipped under a unit-test host or when opted out. Wired into the
+        // error module so its session id stamps every event and handled/unhandled
+        // captures advance the session status.
+        if (options.EnableAutoSessionTracking && !IsLikelyTestHost())
+        {
+            _session = new SessionTracker(options, _transport, _logger);
+            Errors.Session = _session;
+            try { _session.Start(Errors.CurrentUserId); }
+            catch (Exception ex) { _logger.LogDebug(ex, "[AllStak] session start failed"); }
+        }
 
         // Process-wide capture for crashes outside ASP.NET requests (background
         // workers, fire-and-forget tasks). Idempotent + opt-out via options.
@@ -174,6 +190,9 @@ public sealed class AllStakClient : IDisposable
     {
         try { _globalHandler.Unsubscribe(); } catch { }
         try { FlushAllAsync().GetAwaiter().GetResult(); } catch { }
+        // End the release-health session (POST /sessions/end). Idempotent and
+        // bounded; never throws or blocks shutdown indefinitely.
+        try { _session?.End(); } catch { }
         Logs.Dispose();
         Http.Dispose();
         Tracing.Dispose();

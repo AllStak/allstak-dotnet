@@ -1,4 +1,5 @@
 using AllStak.Models;
+using AllStak.Session;
 using AllStak.Transport;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,14 @@ public sealed class ErrorModule
     private readonly List<Breadcrumb> _breadcrumbs = new();
     private UserContext? _currentUser;
 
+    /// <summary>
+    /// Optional release-health session tracker. When set, the active session id
+    /// is stamped on every error payload and the session's status is advanced
+    /// (errored for handled captures, crashed for unhandled/fatal ones). Wired by
+    /// <see cref="AllStakClient"/> after the tracker is created; null otherwise.
+    /// </summary>
+    internal SessionTracker? Session { get; set; }
+
     internal ErrorModule(HttpTransport transport, AllStakOptions options, ILogger logger)
     {
         _transport = transport;
@@ -30,6 +39,9 @@ public sealed class ErrorModule
 
     /// <summary>Clear the current user context.</summary>
     public void ClearUser() => _currentUser = null;
+
+    /// <summary>Id of the current user context, if any. Used to seed the session start envelope.</summary>
+    internal string? CurrentUserId => _currentUser?.Id;
 
     /// <summary>Add a breadcrumb. Oldest are dropped beyond 50.</summary>
     public void AddBreadcrumb(string type, string message, string level = "info", Dictionary<string, object?>? data = null)
@@ -80,6 +92,7 @@ public sealed class ErrorModule
                 Level = level,
                 Environment = _options.Environment,
                 Release = _options.Release,
+                SessionId = Session?.CurrentSessionId,
                 TraceId = traceId,
                 User = user ?? _currentUser,
                 RequestContext = request,
@@ -92,6 +105,10 @@ public sealed class ErrorModule
                 Dist = _options.Dist,
                 Frames = ExtractStructuredFrames(exc),
             };
+
+            // Advance release-health session status: crashed for unhandled/fatal
+            // captures (metadata handled=false), errored for handled ones.
+            RecordSessionStatus(level, metadata);
 
             // SampleRate drop first, then BeforeSend. Sanitizer runs inside the
             // transport (PostAsync), so transport is strictly last.
@@ -152,6 +169,7 @@ public sealed class ErrorModule
                 Level = level,
                 Environment = _options.Environment,
                 Release = _options.Release,
+                SessionId = Session?.CurrentSessionId,
                 TraceId = traceId,
                 User = user ?? _currentUser,
                 RequestContext = request,
@@ -161,6 +179,8 @@ public sealed class ErrorModule
                 Metadata = MergeReleaseTags(metadata),
                 Breadcrumbs = crumbs,
             };
+
+            RecordSessionStatus(level, metadata);
 
             if (!ApplySamplingAndBeforeSend(payload, "message", null))
                 return null;
@@ -172,6 +192,34 @@ public sealed class ErrorModule
         {
             _logger.LogDebug(ex, "[AllStak] capture_error swallowed");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Advance the active release-health session's status for a captured event.
+    /// An event is treated as a crash when it carries <c>handled = false</c>
+    /// metadata (set by the global unhandled-exception handler) or a <c>fatal</c>
+    /// level; otherwise it is a handled error and the session is marked errored.
+    /// No-op when session tracking is disabled. Never throws.
+    /// </summary>
+    private void RecordSessionStatus(string level, Dictionary<string, object>? metadata)
+    {
+        var session = Session;
+        if (session == null) return;
+        try
+        {
+            var unhandled =
+                string.Equals(level, "fatal", StringComparison.OrdinalIgnoreCase) ||
+                (metadata != null
+                 && metadata.TryGetValue("handled", out var handled)
+                 && handled is bool b && !b);
+
+            if (unhandled) session.RecordCrash();
+            else session.RecordError();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "[AllStak] session status update failed");
         }
     }
 

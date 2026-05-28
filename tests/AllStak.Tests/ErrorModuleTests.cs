@@ -3,6 +3,7 @@ using System.Text.Json;
 using AllStak;
 using AllStak.Models;
 using AllStak.Modules;
+using AllStak.Session;
 using AllStak.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -280,6 +281,88 @@ public sealed class ErrorModuleTests : IDisposable
 
         using var doc = JsonDocument.Parse(handler.Bodies[0]);
         Assert.Equal("warning", doc.RootElement.GetProperty("level").GetString());
+    }
+
+    // ── Release-health session id stamping + status transitions ─────────
+
+    /// <summary>Build a module + capturing handler + transport sharing one HttpClient.</summary>
+    private static (ErrorModule module, CapturingHandler handler, HttpTransport transport) CreateModuleWithTransport()
+    {
+        var options = new AllStakOptions
+        {
+            ApiKey = "ask_test_session_errors",
+            Host = "https://fake.allstak.test",
+            Environment = "test",
+            Release = "1.0.0-test",
+            MaxRetries = 1,
+        };
+        var handler = new CapturingHandler();
+        var transport = new HttpTransport(options, NullLogger.Instance);
+        var httpField = typeof(HttpTransport).GetField("_http",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-AllStak-Key", options.ApiKey);
+        httpField.SetValue(transport, client);
+        var module = new ErrorModule(transport, options, NullLogger.Instance);
+        return (module, handler, transport);
+    }
+
+    [Fact]
+    public async Task CaptureException_StampsSessionId_WhenSessionWired()
+    {
+        var (module, handler, transport) = CreateModuleWithTransport();
+        var session = new SessionTracker(new AllStakOptions { ApiKey = "k", Release = "1.0" }, transport, NullLogger.Instance);
+        var started = session.Start();
+        module.Session = session;
+
+        await module.CaptureExceptionAsync(new Exception("boom"));
+
+        // First /errors body (session start also goes through this transport).
+        var errorBody = handler.Bodies.First(b => b.Contains("\"exceptionClass\""));
+        using var doc = JsonDocument.Parse(errorBody);
+        Assert.Equal(started.Id, doc.RootElement.GetProperty("sessionId").GetString());
+    }
+
+    [Fact]
+    public async Task CaptureException_HandledError_MarksSessionErrored()
+    {
+        var (module, _, transport) = CreateModuleWithTransport();
+        var session = new SessionTracker(new AllStakOptions { ApiKey = "k", Release = "1.0" }, transport, NullLogger.Instance);
+        var started = session.Start();
+        module.Session = session;
+
+        await module.CaptureExceptionAsync(new Exception("handled"));
+
+        Assert.Equal(SessionStatus.Errored, started.Status);
+    }
+
+    [Fact]
+    public async Task CaptureException_Unhandled_MarksSessionCrashed()
+    {
+        var (module, _, transport) = CreateModuleWithTransport();
+        var session = new SessionTracker(new AllStakOptions { ApiKey = "k", Release = "1.0" }, transport, NullLogger.Instance);
+        var started = session.Start();
+        module.Session = session;
+
+        // The global handler tags unhandled crashes with handled=false metadata.
+        await module.CaptureExceptionAsync(
+            new Exception("fatal"),
+            metadata: new Dictionary<string, object> { ["handled"] = false });
+
+        Assert.Equal(SessionStatus.Crashed, started.Status);
+    }
+
+    [Fact]
+    public async Task CaptureException_NoSession_LeavesSessionIdNull()
+    {
+        // No session wired (e.g. EnableAutoSessionTracking = false): sessionId is
+        // simply absent / null on the error payload, and nothing throws.
+        var (module, handler) = CreateModule();
+
+        await module.CaptureExceptionAsync(new Exception("no session"));
+
+        using var doc = JsonDocument.Parse(handler.Bodies[0]);
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("sessionId").ValueKind);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

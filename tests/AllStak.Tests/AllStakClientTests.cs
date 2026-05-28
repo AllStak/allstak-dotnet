@@ -112,4 +112,30 @@ public sealed class AllStakClientTests : IDisposable
         AllStakClient.SetUser(id: "u1", email: "a@b.com");
         AllStakClient.ClearUser();
     }
+
+    [Fact]
+    public void EnableAutoSessionTracking_False_WiresNoSession()
+    {
+        var client = AllStakClient.Initialize(o =>
+        {
+            o.ApiKey = "ask_test_no_session";
+            o.EnableAutoSessionTracking = false;
+        });
+
+        // Opt-out: the error module must have no session tracker attached, so no
+        // session id is stamped and no /sessions/start is ever posted.
+        Assert.Null(client.Errors.Session);
+    }
+
+    [Fact]
+    public void DefaultRuntime_UnderTestHost_SkipsSessionTracking()
+    {
+        // EnableAutoSessionTracking defaults to true, but the SDK auto-skips
+        // session tracking under a unit-test host (testhost / vstest / xunit)
+        // exactly as the runtime-release registration does — so no session is
+        // wired when running inside the test runner.
+        var client = AllStakClient.Initialize(o => o.ApiKey = "ask_test_default_session");
+
+        Assert.Null(client.Errors.Session);
+    }
 }

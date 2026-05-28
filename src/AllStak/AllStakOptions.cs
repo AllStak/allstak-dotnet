@@ -87,6 +87,16 @@ public class AllStakOptions
     public bool AutoRegisterRelease { get; set; } = true;
 
     /// <summary>
+    /// Enable Sentry-style release-health session tracking: one session per
+    /// process / app-launch. On init the SDK posts <c>/ingest/v1/sessions/start</c>
+    /// and on graceful shutdown it posts <c>/ingest/v1/sessions/end</c> with the
+    /// final status (ok / errored / crashed). Sessions are never sampled. Default
+    /// <c>true</c>; set <c>false</c> to opt out entirely. Automatically skipped
+    /// under a unit-test host regardless of this flag.
+    /// </summary>
+    public bool EnableAutoSessionTracking { get; set; } = true;
+
+    /// <summary>
     /// Logical service name attached to spans and logs.
     /// </summary>
     public string ServiceName { get; set; } = "dotnet-service";
