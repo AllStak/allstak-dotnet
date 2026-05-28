@@ -5,7 +5,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## 0.1.2 — 2026-05-18
 
-Closes the three P0s flagged in the .NET modernization audit.
+Improves privacy handling, API key rotation, and transport failure visibility.
 
 ### Added — P0-C: Sanitizer wired into wire path
 - New `AllStak.Sanitizer` static class with `Sanitize(IDictionary<string, object?>)` and `SanitizeJson(JsonElement)`. 25-term canonical denylist, recursive, cycle-safe via `RuntimeHelpers.GetHashCode`, pure (no caller mutation).
@@ -21,11 +21,9 @@ Closes the three P0s flagged in the .NET modernization audit.
 - `AllStakOptions.OnTransportError: Action<TransportErrorContext>?` — invoked when `PostAsync` exhausts retries. Host apps can plug their own metrics pipeline / dead-letter queue.
 - Final exhausted-retries failure is now logged at **Warning** level (was Debug — effectively silent in production logging configs).
 
-### Live canary E2E
-Real on-the-wire proof against `https://api.allstak.sa`:
-- Event `e34bebf3-cdaf-485b-bb5c-5f0fa82901e1`.
-- ClickHouse query showed `leak_pos = 0` across `metadata`, `stack_trace`, `breadcrumbs`, `message`.
-- Canary `should_not_leak_dotnet` was planted in `password`, `authorization`, `cookie`, `Bearer`, `api_key`, request headers / body, `credit_card`, `ssn`, and a 3-level-nested `token` field. All scrubbed before the wire.
+### Validation
+- Verified sensitive values are scrubbed from telemetry payloads before delivery.
+- Covered nested metadata, headers, request bodies, and common credential field names.
 
 ### Build
 - 55/55 xUnit tests pass on `net10.0`. Sanitizer covers 11 of them.

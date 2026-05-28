@@ -85,6 +85,12 @@ The SDK redacts common sensitive headers and body fields. Avoid placing secrets 
 - Missing request telemetry: confirm `app.UseAllStak()` runs before endpoint mapping that should be captured.
 - Short-lived worker: flush before shutdown when possible.
 
+## Contributing and Support
+
+- Report bugs with the GitHub bug report template: https://github.com/AllStak/allstak-dotnet/issues/new/choose
+- Open pull requests using the checklist in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Report security vulnerabilities privately through [SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT
