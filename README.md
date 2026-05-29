@@ -4,23 +4,9 @@ AllStak SDK for ASP.NET Core and .NET services. Captures exceptions, logs, inbou
 
 ## Install
 
-> **Not yet on NuGet.** `dotnet add package AllStak` is reserved
-> but does not resolve a published artifact yet. Until first
-> publish lands (tracked in
-> [`docs/devops/sdk-python-dotnet-first-publish.md`](https://github.com/AllStak/allstak/blob/dev/docs/devops/sdk-python-dotnet-first-publish.md)
-> in the platform monorepo), build and reference the project
-> directly from source:
->
-> ```bash
-> git clone https://github.com/AllStak/allstak-dotnet.git
-> dotnet add reference path/to/allstak-dotnet/src/AllStak/AllStak.csproj
-> ```
->
-> Once `0.1.x` ships on NuGet, the canonical install becomes:
->
-> ```bash
-> dotnet add package AllStak
-> ```
+```bash
+dotnet add package AllStak
+```
 
 ## ASP.NET Core setup
 
