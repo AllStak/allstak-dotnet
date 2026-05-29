@@ -102,7 +102,9 @@ public sealed class AllStakMiddleware
             {
                 try
                 {
-                    UserContext? userCtx = options.CaptureUserContext ? BuildUserContext(context) : null;
+                    UserContext? userCtx = options.CaptureUserContext
+                        ? BuildUserContext(context, options.SendDefaultPii)
+                        : null;
 
                     var reqCtx = new RequestContext
                     {
@@ -152,14 +154,16 @@ public sealed class AllStakMiddleware
                ?? user.Identity?.Name;
     }
 
-    private static UserContext? BuildUserContext(HttpContext ctx)
+    private static UserContext? BuildUserContext(HttpContext ctx, bool sendDefaultPii)
     {
         var user = ctx.User;
         if (user?.Identity?.IsAuthenticated != true) return null;
         var id = ExtractUserId(ctx);
         var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
                     ?? user.FindFirst("email")?.Value;
-        var ip = ctx.Connection?.RemoteIpAddress?.ToString();
+        // The client IP is AUTO-collected here (not set explicitly by the host
+        // via SetUser). Sentry parity: drop it unless the host opted into PII.
+        var ip = sendDefaultPii ? ctx.Connection?.RemoteIpAddress?.ToString() : null;
         return new UserContext { Id = id, Email = email, Ip = ip };
     }
 }

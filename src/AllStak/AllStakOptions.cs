@@ -260,6 +260,39 @@ public class AllStakOptions
     /// </summary>
     public bool CaptureUserContext { get; set; } = true;
 
+    /// <summary>
+    /// Send personally-identifiable information that the SDK would otherwise
+    /// scrub from free-text values. Default <c>false</c> for Sentry data-scrubbing
+    /// parity.
+    ///
+    /// <para>When <c>false</c> (default): email addresses and IP addresses that
+    /// appear inside error/log messages, metadata, breadcrumbs, and captured HTTP
+    /// fields are replaced with <c>[REDACTED]</c>, and the auto-collected client IP
+    /// (from <c>HttpContext.Connection.RemoteIpAddress</c>) is dropped. High-risk
+    /// financial/identity data — credit-card numbers (Luhn-validated) and dashed
+    /// US SSNs — is ALWAYS scrubbed regardless of this flag.</para>
+    ///
+    /// <para>When <c>true</c>: you have explicitly opted into PII, so the email /
+    /// IP value scrubbers are disabled and the auto-collected client IP is allowed.
+    /// This does NOT affect key-name redaction (password / token / cookie / …) or
+    /// the always-on financial scrubbers.</para>
+    ///
+    /// <para>This flag never strips data you set explicitly via <c>SetUser</c>
+    /// (id/email/ip) — that is intentional identification and ships as before,
+    /// matching Sentry.</para>
+    /// </summary>
+    public bool SendDefaultPii { get; set; } = false;
+
+    /// <summary>
+    /// Additional case-insensitive key substrings appended to the built-in
+    /// PII / secret denylist. Any event key whose name contains one of these
+    /// (e.g. <c>"x-internal-token"</c>, <c>"customer_pan"</c>) has its value
+    /// replaced with <c>[REDACTED]</c> at the wire chokepoint. The built-in
+    /// denylist (authorization / password / token / cookie / …) always applies;
+    /// this only extends it. Empty by default.
+    /// </summary>
+    public IList<string> ExtraDenylist { get; set; } = new List<string>();
+
     // Release-tracking metadata. All optional; the SDK reads conventional CI
     // env vars (ALLSTAK_*, GIT_*, VERCEL_GIT_*) when these are unset so the
     // `Release` / `CommitSha` / `Branch` fields appear automatically.

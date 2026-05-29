@@ -57,6 +57,8 @@ internal sealed class HttpTransport
     private readonly ILogger _logger;
     private readonly Random _jitter = new();
     private readonly FileSystemCache? _cache;
+    private readonly bool _sendDefaultPii;
+    private readonly string[]? _extraDenylist;
     private volatile bool _disabled;
 
     public bool IsDisabled => _disabled;
@@ -72,6 +74,11 @@ internal sealed class HttpTransport
         _onTransportError = options.OnTransportError; // P0-I — observable failure
         _maxRetries = Math.Clamp(options.MaxRetries, 1, 5);
         _logger = logger;
+        // Data-scrubbing config snapshotted once for the wire chokepoint.
+        _sendDefaultPii = options.SendDefaultPii;
+        _extraDenylist = options.ExtraDenylist is { Count: > 0 } extra
+            ? System.Linq.Enumerable.ToArray(extra)
+            : null;
         _http = new HttpClient
         {
             Timeout = TimeSpan.FromMilliseconds(options.ConnectTimeoutMs + options.ReadTimeoutMs),
@@ -117,14 +124,16 @@ internal sealed class HttpTransport
         // P0-C — sanitize the wire payload BEFORE serializing it onto the network.
         // Serialize → parse → recursive scrub → reserialize. The chokepoint here
         // protects every telemetry type (errors, logs, http, db, traces) with
-        // one wire-in. Critically, the offline cache only ever sees this already-
-        // scrubbed body, so unredacted secrets never touch disk.
+        // one wire-in. Both key-name redaction and value-pattern PII scrubbing
+        // (CC/SSN always; email/IP gated on SendDefaultPii) run here. Critically,
+        // the offline cache only ever sees this already-scrubbed body, so
+        // unredacted secrets never touch disk.
         var rawJson = JsonSerializer.Serialize(payload);
         string scrubbedJson;
         try
         {
             using var doc = JsonDocument.Parse(rawJson);
-            scrubbedJson = Sanitizer.SanitizeJson(doc.RootElement);
+            scrubbedJson = Sanitizer.SanitizeJson(doc.RootElement, _extraDenylist, _sendDefaultPii);
         }
         catch (Exception sanErr)
         {
