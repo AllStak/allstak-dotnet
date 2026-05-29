@@ -8,7 +8,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 ## 0.2.0 — 2026-05-29
 
 Adds release-health session tracking, an offline/persistent transport queue,
-and value-pattern PII scrubbing with Sentry-style `SendDefaultPii` parity.
+and value-pattern PII scrubbing with standard `SendDefaultPii` parity.
 All additive — no breaking changes.
 
 ### Added — Release-health session tracking
@@ -40,7 +40,7 @@ All additive — no breaking changes.
   credit-card numbers (Luhn-validated) and dashed US SSNs are **always**
   redacted; email addresses and IP addresses are redacted unless PII is
   explicitly opted in.
-- New option `SendDefaultPii` (default `false`, Sentry parity): when `false`,
+- New option `SendDefaultPii` (default `false`, ): when `false`,
   email/IP values inside messages, metadata, breadcrumbs, and captured HTTP
   fields are replaced with `[REDACTED]` and the auto-collected client IP
   (from `HttpContext.Connection.RemoteIpAddress`) is dropped; when `true`,
