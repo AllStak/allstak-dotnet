@@ -3,6 +3,66 @@
 All notable changes to the AllStak .NET SDK.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Adds release-health session tracking, an offline/persistent transport queue,
+and value-pattern PII scrubbing with Sentry-style `SendDefaultPii` parity.
+All additive — no breaking changes.
+
+### Added — Release-health session tracking
+- New `AllStak.Session` namespace: `Session`, `SessionStatus`
+  (`ok` / `errored` / `crashed` / `abnormal`), and `SessionTracker`.
+- One session per process / app-launch. On init the SDK posts
+  `/ingest/v1/sessions/start`; on graceful shutdown it posts
+  `/ingest/v1/sessions/end` with the final status, enabling crash-free
+  session/user rates. Sessions are never sampled.
+- `ErrorModule` now escalates session status to `errored` on captured
+  `error`/`fatal` events and to `crashed` on unhandled/fatal exceptions.
+- New option `AllStakOptions.EnableAutoSessionTracking` (default `true`;
+  automatically skipped under a unit-test host). New `SessionPayload` model.
+
+### Added — Offline / persistent transport queue
+- New `AllStak.Transport.FileSystemCache` — durable on-disk envelope queue
+  (one file per envelope, atomic writes, FIFO replay) so telemetry survives
+  process restarts and backend outages. Cached bodies are PII-scrubbed before
+  they touch disk.
+- `HttpTransport` enqueues failed/queued envelopes and replays them on the
+  next successful send.
+- New options: `EnableOfflineCache` (default `true`), `CacheDirectoryPath`,
+  `OfflineCacheMaxEnvelopes` (default `100`), `OfflineCacheMaxBytes`
+  (default `5 MiB`), and `OfflineCacheMaxAgeHours` (default `48`) for bounded,
+  self-evicting storage.
+
+### Added — Value-pattern PII scrubbing + `SendDefaultPii`
+- `Sanitizer` now scrubs sensitive *values* in addition to key names:
+  credit-card numbers (Luhn-validated) and dashed US SSNs are **always**
+  redacted; email addresses and IP addresses are redacted unless PII is
+  explicitly opted in.
+- New option `SendDefaultPii` (default `false`, Sentry parity): when `false`,
+  email/IP values inside messages, metadata, breadcrumbs, and captured HTTP
+  fields are replaced with `[REDACTED]` and the auto-collected client IP
+  (from `HttpContext.Connection.RemoteIpAddress`) is dropped; when `true`,
+  the email/IP value scrubbers are disabled. Never strips data set explicitly
+  via `SetUser`. Always-on financial scrubbers and key-name redaction are
+  unaffected.
+- New option `ExtraDenylist` — extend the built-in key-name denylist with
+  additional case-insensitive substrings (e.g. `customer_pan`).
+- `AllStakMiddleware` honors `SendDefaultPii` when attaching request context.
+
+### Other
+- Automatic CI-free release detection via `git describe`, runtime release
+  auto-registration (`AutoRegisterRelease`), global unhandled-exception capture
+  with `BeforeSend` + sampling, correct `sdk.version` wire value, and
+  `Retry-After` honoring.
+
+### Build
+- 157/157 xUnit tests pass on `net10.0`. Package built against `net8.0` + `net9.0`.
+
+### Repo hygiene
+- Added a .NET `.gitignore`; untracked previously-committed `bin/`, `obj/`,
+  and packed `*.nupkg`/`*.snupkg` artifacts (under `dist/`, `artifacts/`,
+  and build trees). No source or published artifacts affected.
+
 ## 0.1.2 — 2026-05-18
 
 Improves privacy handling, API key rotation, and transport failure visibility.

@@ -1,0 +1,50 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+
+# Packaged artifacts (built by `dotnet pack` / release CI, never committed)
+*.nupkg
+*.snupkg
+*.nuspec
+artifacts/
+dist/
+
+# Build & publish output trees
+[Dd]ebug/
+[Rr]elease/
+[Pp]ublish/
+publish/
+
+# Test results / coverage
+[Tt]est[Rr]esults/
+*.trx
+*.coverage
+*.coverlet.json
+coverage/
+*.opencover.xml
+
+# Restore / SDK caches
+project.assets.json
+project.nuget.cache
+*.nuget.dgspec.json
+*.nuget.g.props
+*.nuget.g.targets
+.dotnet/
+.packages/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Local env
+*.env
+.env.local
