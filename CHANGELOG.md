@@ -5,6 +5,8 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.0 — 2026-05-29
+
 Adds release-health session tracking, an offline/persistent transport queue,
 and value-pattern PII scrubbing with Sentry-style `SendDefaultPii` parity.
 All additive — no breaking changes.
