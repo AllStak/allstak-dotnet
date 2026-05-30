@@ -29,15 +29,38 @@ public sealed class TracingModule : IDisposable
     public string GetTraceId()
     {
         if (_currentTraceId.Value == null)
-            _currentTraceId.Value = Guid.NewGuid().ToString("N");
+            _currentTraceId.Value = TraceHeaders.RandomTraceId();
         return _currentTraceId.Value;
     }
 
     public void SetTraceId(string traceId)
     {
-        _currentTraceId.Value = traceId;
+        _currentTraceId.Value = TraceHeaders.NormalizeTraceId(traceId);
         // New trace adopted — re-decide sampling lazily.
         _currentSampled.Value = null;
+    }
+
+    /// <summary>
+    /// Continue a valid inbound W3C trace with the upstream span as parent.
+    /// Invalid trace/span ids are ignored safely and return <c>false</c>.
+    /// </summary>
+    public bool ContinueTrace(string? traceId, string? parentSpanId, bool? sampled = null)
+    {
+        var normalizedTraceId = TraceHeaders.TryNormalizeTraceId(traceId);
+        var normalizedParentSpanId = TraceHeaders.TryNormalizeSpanId(parentSpanId);
+        if (normalizedTraceId is null || normalizedParentSpanId is null) return false;
+        _currentTraceId.Value = normalizedTraceId;
+        _spanStack.Value = new Stack<string>();
+        _spanStack.Value.Push(normalizedParentSpanId);
+        _currentSampled.Value = sampled;
+        return true;
+    }
+
+    internal void SetParentSpanId(string? spanId)
+    {
+        if (string.IsNullOrWhiteSpace(spanId)) return;
+        _spanStack.Value = new Stack<string>();
+        _spanStack.Value.Push(TraceHeaders.NormalizeSpanId(spanId));
     }
 
     public void ResetTrace()
@@ -65,12 +88,14 @@ public sealed class TracingModule : IDisposable
     }
 
     public string? CurrentSpanId => _spanStack.Value?.Count > 0 ? _spanStack.Value.Peek() : null;
+    internal int ActiveSpanCount => _spanStack.Value?.Count ?? 0;
+    internal bool HasActiveTrace => _currentTraceId.Value != null;
 
     /// <summary>Begin a span. Dispose the returned Span to finish it.</summary>
     public Span StartSpan(string operation, string description = "", IDictionary<string, string>? tags = null)
     {
         var traceId = GetTraceId();
-        var spanId = Guid.NewGuid().ToString("N");
+        var spanId = TraceHeaders.RandomSpanId();
         var parentSpanId = CurrentSpanId ?? "";
 
         _spanStack.Value ??= new Stack<string>();
@@ -98,6 +123,9 @@ public sealed class TracingModule : IDisposable
 
     public Task FlushAsync() => _buffer.FlushAsync();
     public void Dispose() => _buffer.Dispose();
+
+    internal int BufferCount => _buffer.Count;
+    internal long DroppedCount => _buffer.DroppedCount;
 
     private async Task FlushBatchAsync(IReadOnlyList<SpanPayload> items)
     {

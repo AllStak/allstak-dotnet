@@ -43,6 +43,8 @@ public sealed class ErrorModule
     /// <summary>Id of the current user context, if any. Used to seed the session start envelope.</summary>
     internal string? CurrentUserId => _currentUser?.Id;
 
+    internal int BreadcrumbCount { get { lock (_breadcrumbLock) return _breadcrumbs.Count; } }
+
     /// <summary>Add a breadcrumb. Oldest are dropped beyond 50.</summary>
     public void AddBreadcrumb(string type, string message, string level = "info", Dictionary<string, object?>? data = null)
     {

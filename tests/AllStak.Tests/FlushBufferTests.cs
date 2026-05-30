@@ -88,6 +88,40 @@ public sealed class FlushBufferTests : IDisposable
         Assert.True(allFlushed.Count >= 10, "Should have at least 10 items");
         Assert.Contains(11, allFlushed);
         Assert.Contains(12, allFlushed);
+        Assert.Equal(0, overflowBuffer.DroppedCount);
+    }
+
+    [Fact]
+    public void Overflow_IncrementsDroppedCount()
+    {
+        var neverFlush = new FlushBuffer<int>(
+            "overflow-counter-test", maxSize: 3, intervalMs: 60_000,
+            _ => Task.CompletedTask,
+            NullLogger.Instance);
+
+        // Hold the buffer in a flushing state so the 80% auto-flush path cannot
+        // drain it during this synchronous overflow check.
+        typeof(FlushBuffer<int>).GetField("_flushing",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .SetValue(neverFlush, 1);
+
+        try
+        {
+            neverFlush.Push(1);
+            neverFlush.Push(2);
+            neverFlush.Push(3);
+            neverFlush.Push(4);
+
+            Assert.Equal(3, neverFlush.Count);
+            Assert.Equal(1, neverFlush.DroppedCount);
+        }
+        finally
+        {
+            typeof(FlushBuffer<int>).GetField("_flushing",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+                .SetValue(neverFlush, 0);
+            neverFlush.Dispose();
+        }
     }
 
     [Fact]

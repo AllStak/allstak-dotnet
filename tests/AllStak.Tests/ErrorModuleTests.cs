@@ -30,9 +30,7 @@ public sealed class ErrorModuleTests : IDisposable
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken ct)
         {
-            var body = request.Content != null
-                ? await request.Content.ReadAsStringAsync(ct)
-                : "";
+            var body = await TestHttpContent.ReadDecodedStringAsync(request, ct);
             Bodies.Add(body);
             return new HttpResponseMessage(HttpStatusCode.Accepted)
             {

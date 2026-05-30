@@ -38,6 +38,7 @@ public sealed class AllStakMiddleware
 
         var headers = global::AllStak.TraceHeaders.From(context.Request);
         client.Tracing.SetTraceId(headers.TraceId);
+        client.Tracing.SetParentSpanId(headers.ParentSpanId);
         var traceId = client.Tracing.GetTraceId();
 
         var span = client.Tracing.StartSpan(
@@ -141,6 +142,7 @@ public sealed class AllStakMiddleware
                     _logger.LogDebug(ex, "[AllStak] middleware exception capture failed");
                 }
             }
+            client.Tracing.ResetTrace();
         }
     }
 

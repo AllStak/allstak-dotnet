@@ -185,6 +185,51 @@ public sealed class AllStakClient : IDisposable
         Dictionary<string, object>? metadata = null) =>
         IsInitialized ? Instance.Errors.CaptureExceptionAsync(exc, level: level, metadata: metadata) : Task.FromResult<string?>(null);
 
+    /// <summary>Privacy-safe process-wide diagnostics. Contains counters and queue sizes only.</summary>
+    public static AllStakDiagnostics GetDiagnostics() =>
+        IsInitialized ? Instance.Diagnostics : new AllStakDiagnostics { Disabled = true };
+
+    /// <summary>Privacy-safe diagnostics for this client. Contains counters and queue sizes only.</summary>
+    public AllStakDiagnostics Diagnostics
+    {
+        get
+        {
+            var transport = _transport.Diagnostics;
+            var bufferQueueSize =
+                Logs.BufferCount +
+                Http.BufferCount +
+                Tracing.BufferCount +
+                Database.BufferCount;
+            var bufferDropped =
+                Logs.DroppedCount +
+                Http.DroppedCount +
+                Tracing.DroppedCount +
+                Database.DroppedCount;
+
+            return new AllStakDiagnostics
+            {
+                EventsCaptured = transport.EventsCaptured + bufferQueueSize,
+                EventsSent = transport.EventsSent,
+                EventsFailed = transport.EventsFailed,
+                EventsDropped = transport.EventsDropped + bufferDropped,
+                EventsPersisted = transport.EventsPersisted,
+                EventsReplayed = transport.EventsReplayed,
+                QueueSize = transport.QueueSize + bufferQueueSize,
+                RetryAttempts = transport.RetryAttempts,
+                RateLimitedCount = transport.RateLimitedCount,
+                CompressedPayloads = transport.CompressedPayloads,
+                UncompressedPayloads = transport.UncompressedPayloads,
+                CompressionBytesSaved = transport.CompressionBytesSaved,
+                SanitizerRedactionCount = null,
+                ActiveTraceCount = Tracing.HasActiveTrace ? 1 : 0,
+                ActiveSpanCount = Tracing.ActiveSpanCount,
+                BreadcrumbCount = Errors.BreadcrumbCount,
+                SessionRecoveryCount = _session?.RecoveryCount ?? 0,
+                Disabled = transport.Disabled,
+            };
+        }
+    }
+
     /// <summary>Set current user context on the singleton.</summary>
     public static void SetUser(string? id = null, string? email = null, string? ip = null)
     {

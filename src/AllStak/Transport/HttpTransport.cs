@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -47,6 +48,7 @@ internal sealed class HttpTransport
 
     /// <summary>Upper bound on an honored <c>Retry-After</c> delay (5 minutes).</summary>
     internal static readonly TimeSpan MaxRetryAfter = TimeSpan.FromMinutes(5);
+    private const int CompressionThresholdBytes = 1024;
 
     private readonly HttpClient _http;
     private readonly string _baseUrl;
@@ -60,8 +62,35 @@ internal sealed class HttpTransport
     private readonly bool _sendDefaultPii;
     private readonly string[]? _extraDenylist;
     private volatile bool _disabled;
+    private long _eventsCaptured;
+    private long _eventsSent;
+    private long _eventsFailed;
+    private long _eventsDropped;
+    private long _eventsPersisted;
+    private long _eventsReplayed;
+    private long _retryAttempts;
+    private long _rateLimitedCount;
+    private long _compressedPayloads;
+    private long _uncompressedPayloads;
+    private long _compressionBytesSaved;
 
     public bool IsDisabled => _disabled;
+    internal TransportDiagnostics Diagnostics => new()
+    {
+        EventsCaptured = Interlocked.Read(ref _eventsCaptured),
+        EventsSent = Interlocked.Read(ref _eventsSent),
+        EventsFailed = Interlocked.Read(ref _eventsFailed),
+        EventsDropped = Interlocked.Read(ref _eventsDropped),
+        EventsPersisted = Interlocked.Read(ref _eventsPersisted),
+        EventsReplayed = Interlocked.Read(ref _eventsReplayed),
+        RetryAttempts = Interlocked.Read(ref _retryAttempts),
+        RateLimitedCount = Interlocked.Read(ref _rateLimitedCount),
+        CompressedPayloads = Interlocked.Read(ref _compressedPayloads),
+        UncompressedPayloads = Interlocked.Read(ref _uncompressedPayloads),
+        CompressionBytesSaved = Interlocked.Read(ref _compressionBytesSaved),
+        QueueSize = _cache?.Count() ?? 0,
+        Disabled = _disabled,
+    };
 
     /// <summary>The offline spool, or <c>null</c> when offline caching is disabled.</summary>
     internal FileSystemCache? Cache => _cache;
@@ -118,8 +147,12 @@ internal sealed class HttpTransport
 
     public async Task<(int status, string body)> PostAsync<T>(string path, T payload, CancellationToken ct = default)
     {
+        Interlocked.Increment(ref _eventsCaptured);
         if (_disabled)
+        {
+            Interlocked.Increment(ref _eventsDropped);
             throw new AllStakAuthException("SDK disabled due to invalid API key");
+        }
 
         // P0-C — sanitize the wire payload BEFORE serializing it onto the network.
         // Serialize → parse → recursive scrub → reserialize. The chokepoint here
@@ -138,6 +171,8 @@ internal sealed class HttpTransport
         catch (Exception sanErr)
         {
             _logger.LogWarning(sanErr, "[AllStak] sanitizer failed; dropping payload (path={Path})", path);
+            Interlocked.Increment(ref _eventsFailed);
+            Interlocked.Increment(ref _eventsDropped);
             return (0, string.Empty);
         }
 
@@ -160,6 +195,16 @@ internal sealed class HttpTransport
             throw new AllStakAuthException("SDK disabled due to invalid API key");
 
         var url = $"{_baseUrl}{path}";
+        var preparedBody = PrepareRequestBody(scrubbedJson);
+        if (preparedBody.Compressed)
+        {
+            Interlocked.Increment(ref _compressedPayloads);
+            Interlocked.Add(ref _compressionBytesSaved, preparedBody.BytesSaved);
+        }
+        else
+        {
+            Interlocked.Increment(ref _uncompressedPayloads);
+        }
 
         Exception? lastExc = null;
         int lastStatus = 0;
@@ -170,7 +215,13 @@ internal sealed class HttpTransport
             TimeSpan retryAfterDelay = TimeSpan.Zero;
             try
             {
-                using var content = new StringContent(scrubbedJson, Encoding.UTF8, "application/json");
+                using var content = new ByteArrayContent(preparedBody.Body);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/json")
+                {
+                    CharSet = Encoding.UTF8.WebName,
+                };
+                if (preparedBody.Compressed)
+                    content.Headers.ContentEncoding.Add("gzip");
                 using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
                 // P0-H — per-request API key for rotation without restart.
                 req.Headers.TryAddWithoutValidation("X-AllStak-Key", ResolveApiKey());
@@ -182,20 +233,32 @@ internal sealed class HttpTransport
                 if (lastStatus == 401)
                 {
                     _disabled = true;
+                    Interlocked.Increment(ref _eventsFailed);
+                    Interlocked.Increment(ref _eventsDropped);
                     _logger.LogWarning("[AllStak] SDK disabled: invalid API key (401). No further events will be sent.");
                     throw new AllStakAuthException("Invalid API key");
                 }
 
                 if (NonRetryableStatuses.Contains(lastStatus))
+                {
+                    Interlocked.Increment(ref _eventsFailed);
+                    Interlocked.Increment(ref _eventsDropped);
                     return (lastStatus, body);
+                }
 
                 if (lastStatus < 400)
+                {
+                    Interlocked.Increment(ref _eventsSent);
                     return (lastStatus, body);
+                }
 
                 // 429 (rate limited) / 503 (unavailable) may carry a Retry-After
                 // header telling us exactly how long to wait. Honor it when present.
                 if (lastStatus == 429 || lastStatus == 503)
+                {
+                    if (lastStatus == 429) Interlocked.Increment(ref _rateLimitedCount);
                     retryAfterDelay = ParseRetryAfter(resp.Headers.RetryAfter, DateTimeOffset.UtcNow);
+                }
 
                 // 5xx (and 429) — retry
             }
@@ -216,6 +279,7 @@ internal sealed class HttpTransport
 
             if (attempt < _maxRetries)
             {
+                Interlocked.Increment(ref _retryAttempts);
                 TimeSpan delay;
                 if (retryAfterDelay > TimeSpan.Zero)
                 {
@@ -241,6 +305,9 @@ internal sealed class HttpTransport
         {
             persisted = _cache.Persist(path, scrubbedJson);
         }
+        Interlocked.Increment(ref _eventsFailed);
+        if (persisted) Interlocked.Increment(ref _eventsPersisted);
+        else Interlocked.Increment(ref _eventsDropped);
 
         // P0-I — final failure is now visible.
         // 1) Log at Warning (not Debug) so it shows up in default prod logging.
@@ -263,6 +330,32 @@ internal sealed class HttpTransport
         throw new AllStakTransportException(
             $"All {_maxRetries} attempts failed for POST {path}. Last status={lastStatus}, last error={lastExc?.Message}");
     }
+
+    private static PreparedRequestBody PrepareRequestBody(string scrubbedJson)
+    {
+        var raw = Encoding.UTF8.GetBytes(scrubbedJson);
+        if (raw.Length < CompressionThresholdBytes)
+            return new PreparedRequestBody(raw, false, 0);
+
+        try
+        {
+            using var output = new MemoryStream();
+            using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+            {
+                gzip.Write(raw, 0, raw.Length);
+            }
+            var compressed = output.ToArray();
+            if (compressed.Length >= raw.Length)
+                return new PreparedRequestBody(raw, false, 0);
+            return new PreparedRequestBody(compressed, true, raw.Length - compressed.Length);
+        }
+        catch
+        {
+            return new PreparedRequestBody(raw, false, 0);
+        }
+    }
+
+    private readonly record struct PreparedRequestBody(byte[] Body, bool Compressed, int BytesSaved);
 
     /// <summary>
     /// Replay every envelope spooled to the offline cache by a previous process /
@@ -295,7 +388,10 @@ internal sealed class HttpTransport
                 bool accepted = status is >= 200 and < 300;
                 bool permanentReject = status is >= 400 and < 500 && status != 429;
                 if (accepted || permanentReject)
+                {
+                    if (accepted) Interlocked.Increment(ref _eventsReplayed);
                     cache.Remove(env.File);
+                }
                 // else: 5xx / 429 / 0 — leave on disk for the next drain.
             }
             catch (AllStakAuthException)

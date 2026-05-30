@@ -82,6 +82,9 @@ public sealed class HttpMonitorModule : IDisposable
     public Task FlushAsync() => _buffer.FlushAsync();
     public void Dispose() => _buffer.Dispose();
 
+    internal int BufferCount => _buffer.Count;
+    internal long DroppedCount => _buffer.DroppedCount;
+
     private async Task FlushBatchAsync(IReadOnlyList<HttpRequestItem> items)
     {
         for (int i = 0; i < items.Count; i += MaxBatch)

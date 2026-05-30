@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using AllStak.Transport;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -49,6 +51,9 @@ public sealed class HttpTransportTests
     {
         private readonly Queue<HttpResponseMessage> _responses = new();
         public int CallCount { get; private set; }
+        public HttpRequestMessage? LastRequest { get; private set; }
+        public byte[] LastBody { get; private set; } = Array.Empty<byte>();
+        public IReadOnlyCollection<string> LastContentEncoding { get; private set; } = Array.Empty<string>();
 
         public void Enqueue(HttpStatusCode status, string body = "")
         {
@@ -68,13 +73,18 @@ public sealed class HttpTransportTests
             _responses.Enqueue(msg);
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
+            LastContentEncoding = request.Content?.Headers.ContentEncoding.ToArray() ?? Array.Empty<string>();
+            LastBody = request.Content is null
+                ? Array.Empty<byte>()
+                : await request.Content.ReadAsByteArrayAsync(ct);
             if (_responses.Count == 0)
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-            return Task.FromResult(_responses.Dequeue());
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            return _responses.Dequeue();
         }
     }
 
@@ -106,6 +116,41 @@ public sealed class HttpTransportTests
         Assert.Equal(200, status);
         Assert.Contains("ok", body);
         Assert.Equal(1, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task TinyPayload_IsSentUncompressed_AndCounted()
+    {
+        var handler = new FakeHandler();
+        handler.Enqueue(HttpStatusCode.Accepted, """{"ok":true}""");
+        var transport = CreateWithHandler(handler);
+
+        var (status, _) = await transport.PostAsync("/test", new { message = "hi" });
+
+        Assert.Equal(202, status);
+        Assert.Empty(handler.LastContentEncoding);
+        Assert.Contains("\"message\":\"hi\"", Encoding.UTF8.GetString(handler.LastBody));
+        Assert.Equal(1, transport.Diagnostics.UncompressedPayloads);
+        Assert.Equal(0, transport.Diagnostics.CompressedPayloads);
+        Assert.Equal(0, transport.Diagnostics.CompressionBytesSaved);
+    }
+
+    [Fact]
+    public async Task LargePayload_IsGzippedWhenSmaller_AndCounted()
+    {
+        var handler = new FakeHandler();
+        handler.Enqueue(HttpStatusCode.Accepted, """{"ok":true}""");
+        var transport = CreateWithHandler(handler);
+        var message = new string('x', 8_000);
+
+        var (status, _) = await transport.PostAsync("/test", new { message });
+
+        Assert.Equal(202, status);
+        Assert.Contains("gzip", handler.LastContentEncoding);
+        Assert.Contains(message, Gunzip(handler.LastBody));
+        Assert.Equal(1, transport.Diagnostics.CompressedPayloads);
+        Assert.Equal(0, transport.Diagnostics.UncompressedPayloads);
+        Assert.True(transport.Diagnostics.CompressionBytesSaved > 0);
     }
 
     [Fact]
@@ -240,6 +285,15 @@ public sealed class HttpTransportTests
     {
         Assert.Equal(TimeSpan.Zero,
             HttpTransport.ParseRetryAfter(null, DateTimeOffset.UtcNow));
+    }
+
+    private static string Gunzip(byte[] bytes)
+    {
+        using var input = new MemoryStream(bytes);
+        using var gzip = new GZipStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        gzip.CopyTo(output);
+        return Encoding.UTF8.GetString(output.ToArray());
     }
 
     [Fact]

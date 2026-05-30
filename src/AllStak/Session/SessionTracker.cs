@@ -35,6 +35,7 @@ internal sealed class SessionTracker
     private Session? _active;
     private readonly object _lock = new();
     private volatile bool _ended;
+    private long _recoveryCount;
 
     public SessionTracker(AllStakOptions options, HttpTransport transport, ILogger logger, string? statePath = null)
     {
@@ -53,6 +54,7 @@ internal sealed class SessionTracker
     /// consumer can mark the session errored / crashed server-side.
     /// </summary>
     public string? CurrentSessionId => Current?.Id;
+    internal long RecoveryCount => Interlocked.Read(ref _recoveryCount);
 
     /// <summary>Idempotent. Same as <see cref="Start()"/> with no user id.</summary>
     public Session Start() => Start(null);
@@ -241,6 +243,7 @@ internal sealed class SessionTracker
             state.RecoveredAt = now.ToUnixTimeMilliseconds();
             state.RecoveryLockUntil = 0;
             WriteState(state);
+            Interlocked.Increment(ref _recoveryCount);
         }
         catch (Exception ex)
         {

@@ -22,7 +22,7 @@ public sealed class SamplingAndBeforeSendTests : IDisposable
         public List<string> Bodies { get; } = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            var body = request.Content != null ? await request.Content.ReadAsStringAsync(ct) : "";
+            var body = await TestHttpContent.ReadDecodedStringAsync(request, ct);
             Bodies.Add(body);
             return new HttpResponseMessage(HttpStatusCode.Accepted)
             {
@@ -303,6 +303,8 @@ public sealed class SamplingAndBeforeSendTests : IDisposable
         var tracing = CreateTracing(o => o.TracesSampleRate = 1.0);
 
         var span = tracing.StartSpan("op", "desc");
+        Assert.Matches(@"^[0-9a-f]{32}$", span.TraceId);
+        Assert.Matches(@"^[0-9a-f]{16}$", span.SpanId);
         span.Finish("ok");
 
         var buffer = typeof(TracingModule).GetField("_buffer",
@@ -327,6 +329,53 @@ public sealed class SamplingAndBeforeSendTests : IDisposable
         var notSampledReq = new HttpRequestMessage();
         global::AllStak.TraceHeaders.Apply(notSampledReq.Headers, traceId, "req-2", spanId, sampled: false);
         Assert.EndsWith("-00", notSampledReq.Headers.GetValues("traceparent").Single());
+    }
+
+    [Fact]
+    public void TraceHeadersApply_NormalizesUuidFormIds()
+    {
+        var req = new HttpRequestMessage();
+        global::AllStak.TraceHeaders.Apply(
+            req.Headers,
+            "7f3ac1d9-2b8e-4a6f-8c1a-000000000001",
+            "req-1",
+            "abcdef01-2345-6789-abcd-ef0123456789",
+            sampled: true);
+
+        Assert.Equal("00-7f3ac1d92b8e4a6f8c1a000000000001-abcdef0123456789-01",
+            req.Headers.GetValues("traceparent").Single());
+        Assert.Equal("7f3ac1d92b8e4a6f8c1a000000000001",
+            req.Headers.GetValues("X-AllStak-Trace-Id").Single());
+        Assert.Equal("abcdef0123456789",
+            req.Headers.GetValues("X-AllStak-Span-Id").Single());
+    }
+
+    [Fact]
+    public void ContinueTrace_ParentsNextRootSpanToInboundW3CParent()
+    {
+        var tracing = CreateTracing();
+        var traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        var parentSpanId = "7a3ce929d0e0e473";
+
+        Assert.True(tracing.ContinueTrace(traceId, parentSpanId, sampled: true));
+
+        var span = tracing.StartSpan("http.server", "POST /api/certification/trace");
+        Assert.Equal(traceId, span.TraceId);
+        Assert.Equal(parentSpanId, span.ParentSpanId);
+        Assert.Matches(@"^[0-9a-f]{16}$", span.SpanId);
+    }
+
+    [Fact]
+    public void ContinueTrace_IgnoresInvalidInboundContextSafely()
+    {
+        var tracing = CreateTracing();
+
+        Assert.False(tracing.ContinueTrace("not-a-trace", "not-a-span"));
+
+        var span = tracing.StartSpan("fresh-root");
+        Assert.Matches(@"^[0-9a-f]{32}$", span.TraceId);
+        Assert.Matches(@"^[0-9a-f]{16}$", span.SpanId);
+        Assert.Equal("", span.ParentSpanId);
     }
 
     // Mirror TraceHeaders' traceparent format for assertion purposes.

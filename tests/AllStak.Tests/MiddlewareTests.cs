@@ -33,9 +33,7 @@ public sealed class MiddlewareTests : IDisposable
             HttpRequestMessage request, CancellationToken ct)
         {
             Paths.Add(request.RequestUri?.AbsolutePath ?? "");
-            var body = request.Content != null
-                ? await request.Content.ReadAsStringAsync(ct)
-                : "";
+            var body = await TestHttpContent.ReadDecodedStringAsync(request, ct);
             Bodies.Add(body);
             return new HttpResponseMessage(HttpStatusCode.Accepted)
             {
@@ -80,7 +78,8 @@ public sealed class MiddlewareTests : IDisposable
     private static DefaultHttpContext CreateHttpContext(
         string method = "GET",
         string path = "/api/test",
-        string? incomingTraceId = null)
+        string? incomingTraceId = null,
+        string? traceparent = null)
     {
         var context = new DefaultHttpContext();
         context.Request.Method = method;
@@ -90,6 +89,8 @@ public sealed class MiddlewareTests : IDisposable
 
         if (incomingTraceId != null)
             context.Request.Headers["X-AllStak-Trace-Id"] = incomingTraceId;
+        if (traceparent != null)
+            context.Request.Headers["traceparent"] = traceparent;
 
         return context;
     }
@@ -121,11 +122,53 @@ public sealed class MiddlewareTests : IDisposable
             _ => Task.CompletedTask,
             NullLogger<AllStakMiddleware>.Instance);
 
-        var ctx = CreateHttpContext(incomingTraceId: "incoming-trace-abc");
+        var traceId = new string('a', 32);
+        var ctx = CreateHttpContext(incomingTraceId: traceId);
         await middleware.InvokeAsync(ctx);
 
-        Assert.Equal("incoming-trace-abc",
-            ctx.Response.Headers["X-AllStak-Trace-Id"].ToString());
+        Assert.Equal(traceId, ctx.Response.Headers["X-AllStak-Trace-Id"].ToString());
+    }
+
+    [Fact]
+    public async Task Traceparent_ContinuesTraceAndParentsServerSpan()
+    {
+        var handler = InitClientWithCapture();
+        var middleware = new AllStakMiddleware(
+            _ => Task.CompletedTask,
+            NullLogger<AllStakMiddleware>.Instance);
+        var traceId = "0af7651916cd43dd8448eb211c80319c";
+        var parentSpanId = "b7ad6b7169203331";
+
+        var ctx = CreateHttpContext(traceparent: $"00-{traceId}-{parentSpanId}-01");
+        await middleware.InvokeAsync(ctx);
+        await AllStakClient.Instance.FlushAllAsync();
+
+        Assert.Equal(traceId, ctx.Response.Headers["X-AllStak-Trace-Id"].ToString());
+        Assert.Matches(@"^00-[0-9a-f]{32}-[0-9a-f]{16}-01$", ctx.Response.Headers["traceparent"].ToString());
+        var spanBody = handler.Bodies.Single(body => body.Contains("\"spans\""));
+        using var spanDoc = JsonDocument.Parse(spanBody);
+        var span = spanDoc.RootElement.GetProperty("spans")[0];
+        Assert.Equal(traceId, span.GetProperty("traceId").GetString());
+        Assert.Equal(parentSpanId, span.GetProperty("parentSpanId").GetString());
+        Assert.Matches(@"^[0-9a-f]{16}$", span.GetProperty("spanId").GetString()!);
+    }
+
+    [Fact]
+    public async Task InvalidTraceHeaders_AreIgnored()
+    {
+        InitClientWithCapture();
+        var middleware = new AllStakMiddleware(
+            _ => Task.CompletedTask,
+            NullLogger<AllStakMiddleware>.Instance);
+
+        var ctx = CreateHttpContext(
+            incomingTraceId: "not-a-valid-trace",
+            traceparent: "00-00000000000000000000000000000000-0000000000000000-01");
+        await middleware.InvokeAsync(ctx);
+
+        var traceId = ctx.Response.Headers["X-AllStak-Trace-Id"].ToString();
+        Assert.Matches(@"^[0-9a-f]{32}$", traceId);
+        Assert.NotEqual("00000000000000000000000000000000", traceId);
     }
 
     [Fact]

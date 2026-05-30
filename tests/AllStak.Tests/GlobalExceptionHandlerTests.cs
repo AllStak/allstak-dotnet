@@ -24,7 +24,7 @@ public sealed class GlobalExceptionHandlerTests : IDisposable
         public List<string> Bodies { get; } = new();
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            var body = request.Content != null ? await request.Content.ReadAsStringAsync(ct) : "";
+            var body = await TestHttpContent.ReadDecodedStringAsync(request, ct);
             lock (Bodies) Bodies.Add(body);
             return new HttpResponseMessage(HttpStatusCode.Accepted)
             {

@@ -80,6 +80,9 @@ public sealed class LogModule : IDisposable
 
     public void Dispose() => _buffer.Dispose();
 
+    internal int BufferCount => _buffer.Count;
+    internal long DroppedCount => _buffer.DroppedCount;
+
     private async Task FlushBatchAsync(IReadOnlyList<LogPayload> items)
     {
         // Logs endpoint is single-item — send each independently.

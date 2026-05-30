@@ -32,7 +32,7 @@ public sealed class EfCoreInterceptorE2ETests : IDisposable
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken ct)
         {
-            var body = request.Content != null ? await request.Content.ReadAsStringAsync(ct) : "";
+            var body = await TestHttpContent.ReadDecodedStringAsync(request, ct);
             Requests.Add((request.RequestUri!.AbsolutePath, body));
             return new HttpResponseMessage(HttpStatusCode.Accepted)
             {

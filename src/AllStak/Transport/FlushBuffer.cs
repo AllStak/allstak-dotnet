@@ -18,8 +18,10 @@ internal sealed class FlushBuffer<T> : IDisposable
     private bool _overflowWarned;
     private int _flushing;  // interlocked
     private bool _disposed;
+    private long _droppedCount;
 
     public int Count { get { lock (_lock) return _queue.Count; } }
+    public long DroppedCount => Interlocked.Read(ref _droppedCount);
 
     public FlushBuffer(string name, int maxSize, int intervalMs, Func<IReadOnlyList<T>, Task> flush, ILogger logger)
     {
@@ -38,6 +40,7 @@ internal sealed class FlushBuffer<T> : IDisposable
             if (_queue.Count >= _maxSize)
             {
                 _queue.Dequeue(); // drop oldest
+                Interlocked.Increment(ref _droppedCount);
                 if (!_overflowWarned)
                 {
                     _overflowWarned = true;

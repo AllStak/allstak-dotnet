@@ -75,7 +75,7 @@ public sealed class OfflineCacheTransportTests : IDisposable
         {
             CallCount++;
             if (request.Content != null)
-                SeenBodies.Add(await request.Content.ReadAsStringAsync(ct));
+                SeenBodies.Add(await TestHttpContent.ReadDecodedStringAsync(request, ct));
             if (_responses.Count == 0)
                 return new HttpResponseMessage(HttpStatusCode.OK);
             return _responses.Dequeue()();
