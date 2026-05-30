@@ -70,7 +70,7 @@ public sealed class AllStakClient : IDisposable
         // captures advance the session status.
         if (options.EnableAutoSessionTracking && !IsLikelyTestHost())
         {
-            _session = new SessionTracker(options, _transport, _logger);
+            _session = new SessionTracker(options, _transport, _logger, SessionTracker.DefaultStatePath(options));
             Errors.Session = _session;
             try { _session.Start(Errors.CurrentUserId); }
             catch (Exception ex) { _logger.LogDebug(ex, "[AllStak] session start failed"); }

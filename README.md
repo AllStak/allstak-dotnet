@@ -41,13 +41,53 @@ AllStakClient.Instance.Logs.Info("payment retry", new Dictionary<string, object>
 });
 ```
 
-## HttpClient
+## Automatic instrumentation
 
-Register the AllStak handler with clients that should emit outbound request telemetry:
+`AddAllStak()` wires the in-box integrations for you. Outbound HTTP and logging
+capture are fully automatic; EF Core query telemetry takes one line per `DbContext`
+(EF Core does not auto-apply interceptors). Each is default-on and individually
+opt-out:
+
+- **Outbound HttpClient** — on .NET 8+ the AllStak delegating handler is registered
+  as an `IHttpClientFactory` default (`ConfigureHttpClientDefaults`), so every
+  named/typed client propagates the distributed trace and records outbound request
+  telemetry automatically. No `AddHttpMessageHandler` call needed.
+- **Entity Framework Core** — the query interceptor is registered as a DI singleton.
+  EF Core does not apply an interceptor automatically, so add `UseAllStak(serviceProvider)`
+  inside your `AddDbContext` options callback to record SQL, duration, rows, and
+  errors:
+
+  ```csharp
+  builder.Services.AddDbContext<AppDbContext>((sp, options) =>
+      options.UseSqlite(connectionString).UseAllStak(sp));
+  ```
+- **Logging** — the AllStak logger provider is registered in the host logging
+  pipeline, so `ILogger` calls flow to the logs ingest and `LogError` /
+  `LogCritical` with an exception are promoted to the error stream. No separate
+  `builder.Logging.AddAllStak()` call needed.
+
+### Opting out / manual wiring
 
 ```csharp
-builder.Services.AddHttpClient("payments")
-    .AddHttpMessageHandler<AllStakHttpClientHandler>();
+builder.Services.AddAllStak(options =>
+{
+    options.ApiKey = Environment.GetEnvironmentVariable("ALLSTAK_API_KEY");
+
+    options.InstrumentOutboundHttp = false;        // skip auto HttpClient handler
+    options.InstrumentEntityFrameworkCore = false; // skip the EF Core interceptor singleton
+    options.CaptureLogs = false;                   // skip the logging provider
+});
+```
+
+If you opt out but still want a single client or context instrumented:
+
+```csharp
+// One named HttpClient only:
+builder.Services.AddTransient<AllStakHttpHandler>();
+builder.Services.AddHttpClient("payments").AddHttpMessageHandler<AllStakHttpHandler>();
+
+// Instrument a DbContext explicitly (works with or without AddAllStak):
+optionsBuilder.UseSqlite(connection).UseAllStak();
 ```
 
 ## Configuration
@@ -58,8 +98,10 @@ builder.Services.AddHttpClient("payments")
 | `Environment` | Deployment environment. |
 | `Release` | App version or commit SHA. |
 | `ServiceName` | Logical service name. |
-| `CaptureRequestBodies` | Capture redacted request bodies. |
-| `CaptureResponseBodies` | Capture redacted response bodies. |
+| `InstrumentOutboundHttp` | Auto-instrument outbound HttpClient calls (default `true`). |
+| `InstrumentEntityFrameworkCore` | Register the EF Core query interceptor singleton in DI; attach per context with `UseAllStak(sp)` (default `true`). |
+| `CaptureLogs` | Auto-register the logging provider (default `true`). |
+| `CaptureLogsMinLevel` | Minimum log level captured by the provider (default `Information`). |
 
 ## Privacy
 

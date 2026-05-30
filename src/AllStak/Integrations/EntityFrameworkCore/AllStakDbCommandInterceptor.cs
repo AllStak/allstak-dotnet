@@ -1,16 +1,21 @@
 using System.Data.Common;
 using System.Diagnostics;
+using AllStak.Integrations.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace AllStak.Integrations.EntityFrameworkCore;
 
 /// <summary>
 /// EF Core DbCommand interceptor that records every query as DB telemetry.
 ///
-/// Register via:
+/// Attach it inside your <c>AddDbContext</c> registration with the
+/// <see cref="AllStakDbContextExtensions.UseAllStak(Microsoft.EntityFrameworkCore.DbContextOptionsBuilder)"/>
+/// one-liner:
 /// <code>
-/// services.AddDbContext&lt;MyDbContext&gt;(opts =&gt;
-///     opts.UseSqlite(conn).AddInterceptors(new AllStakDbCommandInterceptor()));
+/// services.AddDbContext&lt;MyDbContext&gt;(opts =&gt; opts.UseSqlite(conn).UseAllStak());
 /// </code>
 /// </summary>
 public sealed class AllStakDbCommandInterceptor : DbCommandInterceptor
@@ -148,5 +153,68 @@ public sealed class AllStakDbCommandInterceptor : DbCommandInterceptor
                 databaseType: command.Connection?.GetType().Name);
         }
         catch { }
+    }
+}
+
+/// <summary>
+/// DI helpers for wiring the EF Core query interceptor.
+/// </summary>
+public static class AllStakDbContextExtensions
+{
+    /// <summary>
+    /// Register <see cref="AllStakDbCommandInterceptor"/> as a singleton in DI so a
+    /// single shared instance can be resolved and attached to every context.
+    ///
+    /// <para><b>Important:</b> EF Core does NOT automatically apply an interceptor
+    /// just because it is registered in the application service provider — the
+    /// developer must attach it per context with <c>UseAllStak()</c> inside the
+    /// <c>AddDbContext</c> options callback (see the overloads below). Registering
+    /// the singleton lets the <see cref="UseAllStak(DbContextOptionsBuilder, IServiceProvider)"/>
+    /// overload reuse the SDK-managed instance.</para>
+    ///
+    /// <para><c>AddAllStak()</c> calls this for you unless
+    /// <see cref="AllStakOptions.InstrumentEntityFrameworkCore"/> is set to
+    /// <c>false</c>.</para>
+    /// </summary>
+    public static IServiceCollection AddAllStakDbContextInterceptor(this IServiceCollection services)
+    {
+        if (services is null) throw new ArgumentNullException(nameof(services));
+        services.TryAddSingleton<AllStakDbCommandInterceptor>();
+        return services;
+    }
+
+    /// <summary>
+    /// Attach the AllStak query interceptor to a <c>DbContext</c> from its
+    /// options-builder callback. This is the documented wiring for query telemetry
+    /// and must be added inside your <c>AddDbContext</c> registration (or a manually
+    /// constructed context's <c>OnConfiguring</c>):
+    /// <code>
+    /// services.AddDbContext&lt;MyDbContext&gt;(o =&gt; o.UseSqlite(conn).UseAllStak());
+    /// </code>
+    /// </summary>
+    public static DbContextOptionsBuilder UseAllStak(this DbContextOptionsBuilder optionsBuilder)
+    {
+        if (optionsBuilder is null) throw new ArgumentNullException(nameof(optionsBuilder));
+        return optionsBuilder.AddInterceptors(new AllStakDbCommandInterceptor());
+    }
+
+    /// <summary>
+    /// Attach the AllStak query interceptor using the SDK-managed singleton resolved
+    /// from the application service provider. Use this overload from the
+    /// <c>(serviceProvider, options)</c> form of <c>AddDbContext</c> so the same
+    /// interceptor instance is shared across contexts:
+    /// <code>
+    /// services.AddDbContext&lt;MyDbContext&gt;((sp, o) =&gt; o.UseSqlite(conn).UseAllStak(sp));
+    /// </code>
+    /// Falls back to a fresh interceptor instance when one is not registered in DI.
+    /// </summary>
+    public static DbContextOptionsBuilder UseAllStak(
+        this DbContextOptionsBuilder optionsBuilder, IServiceProvider serviceProvider)
+    {
+        if (optionsBuilder is null) throw new ArgumentNullException(nameof(optionsBuilder));
+        if (serviceProvider is null) throw new ArgumentNullException(nameof(serviceProvider));
+        var interceptor = serviceProvider.GetService<AllStakDbCommandInterceptor>()
+                          ?? new AllStakDbCommandInterceptor();
+        return optionsBuilder.AddInterceptors(interceptor);
     }
 }

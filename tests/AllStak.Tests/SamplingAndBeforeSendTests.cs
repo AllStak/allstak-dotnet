@@ -114,6 +114,60 @@ public sealed class SamplingAndBeforeSendTests : IDisposable
         Assert.Equal("survives", doc.RootElement.GetProperty("message").GetString());
     }
 
+    [Fact]
+    public async Task BeforeSend_ReceivesSanitizedEvent()
+    {
+        AllStakEvent? seen = null;
+        var (module, handler, _) = CreateErrors(o =>
+        {
+            o.BeforeSend = evt =>
+            {
+                seen = evt;
+                return evt;
+            };
+        });
+
+        await module.CaptureExceptionAsync(
+            new Exception("card 4111111111111111"),
+            metadata: new Dictionary<string, object>
+            {
+                ["Authorization"] = "Bearer abc",
+                ["nested"] = new Dictionary<string, object> { ["apiKey"] = "key-123" },
+            });
+
+        Assert.Single(handler.Bodies);
+        Assert.NotNull(seen);
+        Assert.Equal("card [REDACTED]", seen!.Message);
+        Assert.Equal("[REDACTED]", seen.Metadata!["Authorization"]);
+        var nested = Assert.IsType<Dictionary<string, object>>(seen.Metadata["nested"]);
+        Assert.Equal("[REDACTED]", nested["apiKey"]);
+    }
+
+    [Fact]
+    public async Task BeforeSend_CannotReintroduceSecretsOnWire()
+    {
+        var (module, handler, _) = CreateErrors(o =>
+        {
+            o.BeforeSend = evt =>
+            {
+                evt.Message = "card 4111111111111111";
+                evt.Metadata ??= new Dictionary<string, object>();
+                evt.Metadata["Authorization"] = "Bearer abc";
+                evt.Metadata["nested"] = new Dictionary<string, object> { ["token"] = "secret-token" };
+                return evt;
+            };
+        });
+
+        await module.CaptureExceptionAsync(new Exception("original"));
+
+        Assert.Single(handler.Bodies);
+        using var doc = JsonDocument.Parse(handler.Bodies[0]);
+        Assert.Equal("card [REDACTED]", doc.RootElement.GetProperty("message").GetString());
+        var metadata = doc.RootElement.GetProperty("metadata");
+        Assert.Equal("[REDACTED]", metadata.GetProperty("Authorization").GetString());
+        Assert.Equal("[REDACTED]", metadata.GetProperty("nested").GetProperty("token").GetString());
+    }
+
     // ── SampleRate ────────────────────────────────────────────────────
 
     [Fact]

@@ -162,7 +162,7 @@ public sealed class AllStakMiddleware
         var email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
                     ?? user.FindFirst("email")?.Value;
         // The client IP is AUTO-collected here (not set explicitly by the host
-        // via SetUser). Sentry parity: drop it unless the host opted into PII.
+        // via SetUser). Safe-by-default: drop it unless the host opted into PII.
         var ip = sendDefaultPii ? ctx.Connection?.RemoteIpAddress?.ToString() : null;
         return new UserContext { Id = id, Email = email, Ip = ip };
     }

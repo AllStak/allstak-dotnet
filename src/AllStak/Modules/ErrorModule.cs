@@ -110,8 +110,9 @@ public sealed class ErrorModule
             // captures (metadata handled=false), errored for handled ones.
             RecordSessionStatus(level, metadata);
 
-            // SampleRate drop first, then BeforeSend. Sanitizer runs inside the
-            // transport (PostAsync), so transport is strictly last.
+            // SampleRate drop first, then a pre-hook sanitizer, then BeforeSend.
+            // The transport sanitizer still runs last, so hook mutations are
+            // scrubbed again before persistence/network send.
             if (!ApplySamplingAndBeforeSend(payload, "exception", exc))
                 return null;
 
@@ -240,11 +241,12 @@ public sealed class ErrorModule
     }
 
     /// <summary>
-    /// Apply <see cref="AllStakOptions.SampleRate"/> (drop first) then
-    /// <see cref="AllStakOptions.BeforeSend"/> to an outgoing error payload.
-    /// Returns <c>false</c> when the event must be dropped. Mutations made by
-    /// BeforeSend are copied back onto <paramref name="payload"/>. BeforeSend
-    /// fails open: a throwing callback is logged and the original event is sent.
+    /// Apply <see cref="AllStakOptions.SampleRate"/> (drop first), sanitize,
+    /// then apply <see cref="AllStakOptions.BeforeSend"/> to an outgoing error
+    /// payload. Returns <c>false</c> when the event must be dropped. Mutations
+    /// made by BeforeSend are copied back onto <paramref name="payload"/>.
+    /// BeforeSend fails open: a throwing callback is logged and the sanitized
+    /// pre-callback event is sent.
     /// </summary>
     private bool ApplySamplingAndBeforeSend(ErrorPayload payload, string eventType, Exception? original)
     {
@@ -255,18 +257,12 @@ public sealed class ErrorModule
             return false;
         }
 
-        // 2) BeforeSend — caller may mutate or drop (null).
+        // 2) BeforeSend — caller sees sanitized data and may mutate or drop.
         var beforeSend = _options.BeforeSend;
         if (beforeSend == null) return true;
 
-        var evt = new AllStakEvent(eventType, original)
-        {
-            ExceptionClass = payload.ExceptionClass,
-            Message = payload.Message,
-            Level = payload.Level,
-            TraceId = payload.TraceId,
-            Metadata = payload.Metadata,
-        };
+        var evt = BuildSanitizedBeforeSendEvent(payload, eventType, original);
+        CopyBeforeSendResult(payload, evt);
 
         AllStakEvent? result;
         try
@@ -275,8 +271,8 @@ public sealed class ErrorModule
         }
         catch (Exception ex)
         {
-            // Fail open: send the original event unchanged.
-            _logger.LogWarning(ex, "[AllStak] BeforeSend threw; sending original event (type={Type})", eventType);
+            // Fail open: send the pre-sanitized event unchanged.
+            _logger.LogWarning(ex, "[AllStak] BeforeSend threw; sending sanitized event (type={Type})", eventType);
             return true;
         }
 
@@ -286,13 +282,75 @@ public sealed class ErrorModule
             return false;
         }
 
-        // Copy back mutable fields.
+        CopyBeforeSendResult(payload, result);
+        return true;
+    }
+
+    private AllStakEvent BuildSanitizedBeforeSendEvent(ErrorPayload payload, string eventType, Exception? original)
+    {
+        try
+        {
+            var raw = new Dictionary<string, object?>
+            {
+                ["exceptionClass"] = payload.ExceptionClass,
+                ["message"] = payload.Message,
+                ["level"] = payload.Level,
+                ["traceId"] = payload.TraceId,
+                ["metadata"] = payload.Metadata,
+            };
+            var scrubbed = Sanitizer.Sanitize(raw, _options.ExtraDenylist, _options.SendDefaultPii);
+            return new AllStakEvent(eventType, original)
+            {
+                ExceptionClass = ValueAsString(scrubbed, "exceptionClass") ?? payload.ExceptionClass,
+                Message = ValueAsString(scrubbed, "message") ?? "",
+                Level = ValueAsString(scrubbed, "level") ?? payload.Level,
+                TraceId = ValueAsString(scrubbed, "traceId"),
+                Metadata = ValueAsMetadata(scrubbed.TryGetValue("metadata", out var metadata) ? metadata : null),
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[AllStak] sanitizer failed before BeforeSend; sending redacted event (type={Type})", eventType);
+            return new AllStakEvent(eventType, original)
+            {
+                ExceptionClass = payload.ExceptionClass,
+                Message = Sanitizer.Redacted,
+                Level = payload.Level,
+                TraceId = payload.TraceId,
+                Metadata = new Dictionary<string, object> { ["redacted"] = true },
+            };
+        }
+    }
+
+    private static string? ValueAsString(IDictionary<string, object?> values, string key)
+        => values.TryGetValue(key, out var value) ? value?.ToString() : null;
+
+    private static Dictionary<string, object>? ValueAsMetadata(object? value)
+    {
+        if (value is null) return null;
+        if (value is IDictionary<string, object?> typed)
+        {
+            var copy = new Dictionary<string, object>(typed.Count);
+            foreach (var kv in typed) copy[kv.Key] = kv.Value ?? "";
+            return copy;
+        }
+        if (value is System.Collections.IDictionary dict)
+        {
+            var copy = new Dictionary<string, object>(dict.Count);
+            foreach (System.Collections.DictionaryEntry kv in dict)
+                copy[kv.Key?.ToString() ?? ""] = kv.Value ?? "";
+            return copy;
+        }
+        return new Dictionary<string, object> { ["value"] = value };
+    }
+
+    private static void CopyBeforeSendResult(ErrorPayload payload, AllStakEvent result)
+    {
         payload.ExceptionClass = result.ExceptionClass ?? payload.ExceptionClass;
         payload.Message = result.Message;
         payload.Level = result.Level;
         payload.TraceId = result.TraceId;
         payload.Metadata = result.Metadata;
-        return true;
     }
 
     private static List<string> ExtractFrames(Exception exc)

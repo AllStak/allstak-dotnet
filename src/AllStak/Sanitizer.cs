@@ -18,7 +18,7 @@ namespace AllStak
     /// 1. KEY-NAME redaction (always on): case-insensitive substring match on
     ///    keys (password / token / cookie / …) → value replaced with the
     ///    sentinel "[REDACTED]".
-    /// 2. VALUE-PATTERN redaction (Sentry data-scrubbing parity): high-risk
+    /// 2. VALUE-PATTERN redaction: high-risk
     ///    financial/identity patterns that leak into free-text string VALUES are
     ///    matched and replaced even when the key looks innocent.
     ///    - ALWAYS scrubbed (never legitimately wanted in telemetry):
@@ -27,8 +27,7 @@ namespace AllStak
     ///          / timestamps are not corrupted.
     ///        • US SSN in dashed <c>ddd-dd-dddd</c> form (bare 9-digit numbers are
     ///          NOT matched, to avoid nuking arbitrary numeric ids).
-    ///    - Scrubbed UNLESS <c>sendDefaultPii</c> is true (default false = Sentry
-    ///      parity):
+    ///    - Scrubbed UNLESS <c>sendDefaultPii</c> is true (default false):
     ///        • Email addresses.
     ///        • IPv4 addresses (octets validated 0-255).
     ///
@@ -129,8 +128,8 @@ namespace AllStak
         /// Keys whose entire nested subtree (object or array) is exempt from
         /// value-pattern scrubbing. The explicit <c>user</c> object is intentional
         /// identification set via <c>SetUser</c> (id/email/ip ship as before —
-        /// <c>sendDefaultPii</c> does NOT strip explicitly-set user data, matching
-        /// Sentry). Structured stack frames (<c>frames</c>) and raw stack-trace
+        /// <c>sendDefaultPii</c> does NOT strip explicitly-set user data).
+        /// Structured stack frames (<c>frames</c>) and raw stack-trace
         /// lines (<c>stackTrace</c>) carry filenames / namespaces, not free-text
         /// PII, and must not be corrupted. Key-name redaction still recurses into
         /// these subtrees.

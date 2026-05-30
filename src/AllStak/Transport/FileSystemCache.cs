@@ -14,7 +14,7 @@ namespace AllStak.Transport;
 internal readonly record struct CachedEnvelope(string Path, string Body, string File);
 
 /// <summary>
-/// Sentry-style on-disk spool for telemetry that could not be delivered live
+/// On-disk spool for telemetry that could not be delivered live
 /// (network outage, retries exhausted, or process shutting down with events still
 /// buffered). One file per envelope. Bodies written here are <b>already PII
 /// scrubbed</b> — the transport sanitizes on the wire-in chokepoint and only the

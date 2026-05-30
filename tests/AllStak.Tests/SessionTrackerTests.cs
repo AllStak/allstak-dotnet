@@ -65,6 +65,9 @@ public sealed class SessionTrackerTests
         return (transport, handler);
     }
 
+    private static string StatePath() =>
+        Path.Combine(Path.GetTempPath(), $"allstak-session-{Guid.NewGuid():N}.json");
+
     /// <summary>Spin until at least one body is captured for the path, or time out.</summary>
     private static async Task<string> WaitForBodyAsync(CapturingHandler handler, string path)
     {
@@ -253,6 +256,105 @@ public sealed class SessionTrackerTests
 
         tracker.End();
         Assert.Null(tracker.CurrentSessionId);
+    }
+
+    [Fact]
+    public async Task CleanShutdown_DoesNotRecoverAbnormalOnNextStart()
+    {
+        var statePath = StatePath();
+        var options = MakeOptions();
+        var (firstTransport, _) = MakeTransport(options);
+        var first = new SessionTracker(options, firstTransport, NullLogger.Instance, statePath);
+        first.Start();
+        first.End();
+
+        var (secondTransport, secondHandler) = MakeTransport(options);
+        var second = new SessionTracker(options, secondTransport, NullLogger.Instance, statePath);
+        second.Start();
+
+        await WaitForBodyAsync(secondHandler, "/ingest/v1/sessions/start");
+        Assert.Empty(secondHandler.BodiesFor("/ingest/v1/sessions/end"));
+    }
+
+    [Fact]
+    public async Task OpenSession_IsRecoveredAsAbnormalOnNextStart()
+    {
+        var statePath = StatePath();
+        var options = MakeOptions();
+        var (firstTransport, _) = MakeTransport(options);
+        var first = new SessionTracker(options, firstTransport, NullLogger.Instance, statePath);
+        var session = first.Start();
+
+        var (secondTransport, secondHandler) = MakeTransport(options);
+        var second = new SessionTracker(options, secondTransport, NullLogger.Instance, statePath);
+        second.Start();
+
+        var body = await WaitForBodyAsync(secondHandler, "/ingest/v1/sessions/end");
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(session.Id, doc.RootElement.GetProperty("sessionId").GetString());
+        Assert.Equal("abnormal", doc.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task CrashedOpenSession_IsRecoveredAsCrashedOnNextStart()
+    {
+        var statePath = StatePath();
+        var options = MakeOptions();
+        var (firstTransport, _) = MakeTransport(options);
+        var first = new SessionTracker(options, firstTransport, NullLogger.Instance, statePath);
+        var session = first.Start();
+        first.RecordCrash();
+
+        var (secondTransport, secondHandler) = MakeTransport(options);
+        var second = new SessionTracker(options, secondTransport, NullLogger.Instance, statePath);
+        second.Start();
+
+        var body = await WaitForBodyAsync(secondHandler, "/ingest/v1/sessions/end");
+        using var doc = JsonDocument.Parse(body);
+        Assert.Equal(session.Id, doc.RootElement.GetProperty("sessionId").GetString());
+        Assert.Equal("crashed", doc.RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task CorruptSessionState_IsClearedSafely()
+    {
+        var statePath = StatePath();
+        File.WriteAllText(statePath, "{not-json");
+        var options = MakeOptions();
+        var (transport, handler) = MakeTransport(options);
+        var tracker = new SessionTracker(options, transport, NullLogger.Instance, statePath);
+        tracker.Start();
+
+        await WaitForBodyAsync(handler, "/ingest/v1/sessions/start");
+        Assert.Empty(handler.BodiesFor("/ingest/v1/sessions/end"));
+    }
+
+    [Fact]
+    public async Task RecoveredAbnormalSession_IsNotReportedTwice()
+    {
+        var statePath = StatePath();
+        var options = MakeOptions();
+        var (firstTransport, _) = MakeTransport(options);
+        var first = new SessionTracker(options, firstTransport, NullLogger.Instance, statePath);
+        first.Start();
+
+        var (secondTransport, secondHandler) = MakeTransport(options);
+        var second = new SessionTracker(options, secondTransport, NullLogger.Instance, statePath);
+        second.Start();
+        var recovered = await WaitForBodyAsync(secondHandler, "/ingest/v1/sessions/end");
+        using (var doc = JsonDocument.Parse(recovered))
+            Assert.Equal("abnormal", doc.RootElement.GetProperty("status").GetString());
+        second.End();
+
+        var (thirdTransport, thirdHandler) = MakeTransport(options);
+        var third = new SessionTracker(options, thirdTransport, NullLogger.Instance, statePath);
+        third.Start();
+        await WaitForBodyAsync(thirdHandler, "/ingest/v1/sessions/start");
+        Assert.DoesNotContain(thirdHandler.BodiesFor("/ingest/v1/sessions/end"), body =>
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.GetProperty("status").GetString() == "abnormal";
+        });
     }
 
     // ── disabled transport keeps in-memory tracking, skips network ──────

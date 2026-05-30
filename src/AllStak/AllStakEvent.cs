@@ -3,7 +3,8 @@ namespace AllStak;
 /// <summary>
 /// A mutable, transport-agnostic view of an error or message event passed to
 /// <see cref="AllStakOptions.BeforeSend"/> immediately before the event is
-/// handed to the transport (and before the PII sanitizer runs).
+/// handed to the transport. The event has already passed through the sanitizer,
+/// and the transport sanitizes it again after the hook returns.
 ///
 /// <para>Mutating the fields here changes what is sent. Returning <c>null</c>
 /// from <see cref="AllStakOptions.BeforeSend"/> drops the event entirely.</para>

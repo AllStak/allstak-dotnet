@@ -83,7 +83,7 @@ internal sealed class HttpTransport
         {
             Timeout = TimeSpan.FromMilliseconds(options.ConnectTimeoutMs + options.ReadTimeoutMs),
         };
-        // Offline/persistent queue (Sentry-style): scrubbed envelopes that cannot be
+        // Offline/persistent queue: scrubbed envelopes that cannot be
         // delivered are spooled to disk and replayed on the next init. Fully fail-open
         // — a non-writable dir simply yields IsAvailable=false and we no-op.
         if (options.EnableOfflineCache)

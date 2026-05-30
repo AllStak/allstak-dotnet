@@ -4,7 +4,7 @@ namespace AllStak.Session;
 /// Lifecycle status of a release-health session.
 ///
 /// <para>Vocabulary matches the AllStak backend's <c>/ingest/v1/sessions/end</c>
-/// contract and Sentry's release-health conventions:</para>
+/// contract and standard release-health conventions:</para>
 ///
 /// <list type="bullet">
 ///   <item><see cref="Ok"/> — session ended normally with at most non-fatal logs.</item>

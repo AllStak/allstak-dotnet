@@ -87,7 +87,7 @@ public class AllStakOptions
     public bool AutoRegisterRelease { get; set; } = true;
 
     /// <summary>
-    /// Enable Sentry-style release-health session tracking: one session per
+    /// Enable release-health session tracking: one session per
     /// process / app-launch. On init the SDK posts <c>/ingest/v1/sessions/start</c>
     /// and on graceful shutdown it posts <c>/ingest/v1/sessions/end</c> with the
     /// final status (ok / errored / crashed). Sessions are never sampled. Default
@@ -112,7 +112,7 @@ public class AllStakOptions
     public int BufferSize { get; set; } = 500;
 
     /// <summary>
-    /// Enable the Sentry-style offline / persistent event queue: telemetry that
+    /// Enable the offline / persistent event queue: telemetry that
     /// cannot be delivered (network outage, retries exhausted, or process shutting
     /// down with events still buffered) is written — <b>already PII-scrubbed</b> —
     /// to a filesystem spool directory and replayed on the next SDK init. Survives a
@@ -202,10 +202,12 @@ public class AllStakOptions
 
     /// <summary>
     /// Optional hook invoked once for every error / message event immediately
-    /// before it is handed to the transport (and before the PII sanitizer runs).
-    /// Return the (possibly mutated) event to send it, or <c>null</c> to drop it.
-    /// If the callback throws, the SDK fails open: it logs and sends the original
-    /// event unchanged.
+    /// before it is handed to the transport, after a first sanitizer pass.
+    /// Return the (possibly mutated) sanitized event to send it, or <c>null</c>
+    /// to drop it. The transport sanitizes the returned event again before
+    /// persistence/network send, so hooks cannot reintroduce secrets. If the
+    /// callback throws, the SDK fails open: it logs and sends the sanitized
+    /// pre-callback event unchanged.
     /// </summary>
     public Func<AllStakEvent, AllStakEvent?>? BeforeSend { get; set; }
 
@@ -256,14 +258,54 @@ public class AllStakOptions
     public bool CaptureHttpRequests { get; set; } = true;
 
     /// <summary>
+    /// If <c>true</c> (default), <c>AddAllStak()</c> auto-instruments <b>outbound</b>
+    /// <c>HttpClient</c> calls on .NET 8+ by registering the AllStak delegating
+    /// handler as a default for every named/typed client created through
+    /// <c>IHttpClientFactory</c> (<c>ConfigureHttpClientDefaults</c>). This makes
+    /// distributed trace propagation and outbound HTTP telemetry automatic with no
+    /// per-client <c>AddHttpMessageHandler</c> call. Set <c>false</c> to opt out and
+    /// wire the handler manually. The SDK's own internal transport never routes
+    /// through <c>IHttpClientFactory</c>, so there is no self-instrumentation loop.
+    /// </summary>
+    public bool InstrumentOutboundHttp { get; set; } = true;
+
+    /// <summary>
+    /// If <c>true</c> (default), <c>AddAllStak()</c> registers the EF Core command
+    /// interceptor as a shared singleton in DI. EF Core does not auto-apply an
+    /// interceptor from the application service provider, so attach it per context
+    /// with <c>o.UseSqlite(conn).UseAllStak(serviceProvider)</c> inside your
+    /// <c>AddDbContext</c> options callback to record query telemetry (SQL,
+    /// duration, rows, errors). Set <c>false</c> to skip registering the singleton.
+    /// </summary>
+    public bool InstrumentEntityFrameworkCore { get; set; } = true;
+
+    /// <summary>
+    /// If <c>true</c> (default), <c>AddAllStak()</c> registers
+    /// <see cref="AllStak.Integrations.Logging.AllStakLoggerProvider"/> in the host
+    /// logging pipeline so <c>ILogger</c> calls flow to <c>/ingest/v1/logs</c> and
+    /// <c>LogError</c>/<c>LogCritical</c> with an exception are promoted to the error
+    /// stream — without a separate <c>builder.Logging.AddAllStak()</c> call. Set
+    /// <c>false</c> to opt out and wire the provider manually.
+    /// </summary>
+    public bool CaptureLogs { get; set; } = true;
+
+    /// <summary>
+    /// Minimum <see cref="Microsoft.Extensions.Logging.LogLevel"/> captured by the
+    /// auto-registered <see cref="AllStak.Integrations.Logging.AllStakLoggerProvider"/>
+    /// when <see cref="CaptureLogs"/> is on. Default <c>Information</c>.
+    /// </summary>
+    public Microsoft.Extensions.Logging.LogLevel CaptureLogsMinLevel { get; set; }
+        = Microsoft.Extensions.Logging.LogLevel.Information;
+
+    /// <summary>
     /// If <c>true</c>, attach user context from <c>HttpContext.User</c> to captured events.
     /// </summary>
     public bool CaptureUserContext { get; set; } = true;
 
     /// <summary>
     /// Send personally-identifiable information that the SDK would otherwise
-    /// scrub from free-text values. Default <c>false</c> for Sentry data-scrubbing
-    /// parity.
+    /// scrub from free-text values. Default <c>false</c> for safe-by-default
+    /// data scrubbing.
     ///
     /// <para>When <c>false</c> (default): email addresses and IP addresses that
     /// appear inside error/log messages, metadata, breadcrumbs, and captured HTTP
@@ -278,8 +320,7 @@ public class AllStakOptions
     /// the always-on financial scrubbers.</para>
     ///
     /// <para>This flag never strips data you set explicitly via <c>SetUser</c>
-    /// (id/email/ip) — that is intentional identification and ships as before,
-    /// matching Sentry.</para>
+    /// (id/email/ip) — that is intentional identification and ships as before.</para>
     /// </summary>
     public bool SendDefaultPii { get; set; } = false;
 

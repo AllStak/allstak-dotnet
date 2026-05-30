@@ -5,6 +5,42 @@ This project follows [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.3.0 — 2026-05-30
+
+Wires the in-box integrations from a single `AddAllStak()` call. Outbound HTTP and
+logging capture are fully automatic; EF Core query telemetry needs a one-line
+`UseAllStak(serviceProvider)` per `DbContext` (EF Core does not auto-apply
+interceptors). All additive and default-on — existing manual wiring keeps working,
+and every integration is individually opt-out.
+
+### Added — Automatic outbound HttpClient instrumentation
+- `AddAllStak()` now registers `AllStakHttpHandler` as transient and applies it as
+  an `IHttpClientFactory` default via `ConfigureHttpClientDefaults` (.NET 8+), so
+  every named/typed client propagates the distributed trace and records outbound
+  HTTP telemetry without a per-client `AddHttpMessageHandler` call. The SDK's own
+  transport does not route through `IHttpClientFactory`, so there is no
+  self-instrumentation loop.
+- New opt-out `AllStakOptions.InstrumentOutboundHttp` (default `true`).
+
+### Added — Entity Framework Core query telemetry
+- `AddAllStak()` registers `AllStakDbCommandInterceptor` as a shared DI singleton.
+  EF Core does not auto-apply an interceptor from the application service provider,
+  so attach it per context with the documented one-liner inside `AddDbContext`:
+  `o.UseSqlite(conn).UseAllStak(serviceProvider)`. This records SQL, duration,
+  rows, and errors as DB telemetry.
+- New `DbContextOptionsBuilder.UseAllStak()` and `UseAllStak(IServiceProvider)`
+  one-liners (the latter reuses the SDK-managed singleton), plus the
+  `AddAllStakDbContextInterceptor()` DI helper.
+- New opt-out `AllStakOptions.InstrumentEntityFrameworkCore` (default `true`).
+
+### Added — Automatic logging capture
+- `AddAllStak()` now registers `AllStakLoggerProvider` in the host logging
+  pipeline, so `ILogger` output reaches `/ingest/v1/logs` and `LogError` /
+  `LogCritical` with an exception are promoted to the error stream, without a
+  separate `builder.Logging.AddAllStak()` call.
+- New opt-out `AllStakOptions.CaptureLogs` (default `true`) and
+  `AllStakOptions.CaptureLogsMinLevel` (default `Information`).
+
 ## 0.2.0 — 2026-05-29
 
 Adds release-health session tracking, an offline/persistent transport queue,

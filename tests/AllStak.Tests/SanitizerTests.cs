@@ -171,7 +171,7 @@ public class SanitizerTests
         Assert.Null(AllStak.Sanitizer.SanitizeObject(null));
     }
 
-    // ── Value-pattern PII scrubbing (Sentry data-scrubbing parity) ──────────
+    // ── Value-pattern PII scrubbing ─────────────────────────────────────────
 
     // A real Visa test number that passes the Luhn checksum.
     private const string ValidCard = "4111111111111111";
@@ -309,7 +309,7 @@ public class SanitizerTests
     public void ExplicitUser_Email_NotScrubbed()
     {
         // The explicit user object is intentional identification; sendDefaultPii
-        // (false here) must NOT strip user.email / user.ip — matching Sentry.
+        // (false here) must NOT strip user.email / user.ip.
         var input = new Dictionary<string, object?>
         {
             ["user"] = new Dictionary<string, object?>
